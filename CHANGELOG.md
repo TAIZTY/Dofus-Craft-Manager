@@ -10,3 +10,11 @@
 - Atelier : sélection clavier, double-clic, suppression explicite du stock.
 - Atelier : investissement, vente brute/nette, taxe, bénéfice net, ROI et bénéfice moyen.
 - Ajout d’un `.gitignore` pour protéger la base locale.
+
+
+## V6.2 — Architecture & performance
+- Backend découpé en modules `dcm/` (base, moteur, économie, atelier, synchronisation).
+- Cache des réponses analytiques invalidé lors des changements de prix, paramètres ou stock.
+- SQLite configuré avec cache mémoire, mmap et tables temporaires en mémoire.
+- Synchronisation API regroupée en opérations batch.
+- Comportement et interface V6.1 conservés.

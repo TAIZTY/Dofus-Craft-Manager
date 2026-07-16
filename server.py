@@ -2,523 +2,37 @@ import csv
 import io
 import json
 import shutil
-import sqlite3
 import threading
 import time
-import unicodedata
 import urllib.parse
-import urllib.request
 from datetime import datetime
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
-from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-DATA_DIR = ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
-DB = DATA_DIR / "dofus_salar.sqlite"
-NAMES = DATA_DIR / "items_names.json"
-API_BASE = "https://api.dofusdu.de/dofus3/v1/fr/items"
-TYPES = ["equipment", "resources", "consumables"]
+from dcm.config import ROOT, DATA_DIR, DB, normalize_search, visible_item_sql
+from dcm.database import db, init_db, get_setting, tax_rate
+from dcm.economics import best_unit, lot_purchase_plan
+from dcm.engine import build_engine, invalidate_engine, craft_tree, engine_generation
+from dcm.workshop import make_workshop_context, build_workshop_plan, strict_budget_plan
+from dcm.sync import progress, sync_data
 
-# Objets techniques, MJ et entrées manifestement internes à masquer dans l’interface.
-HIDDEN_NAME_PATTERNS = (
-    "(mj)", "timer ", "test ", "debug", "placeholder", "dummy",
-    "invisible", "à supprimer", "a supprimer",
-)
+_RESPONSE_CACHE = {}
+_RESPONSE_CACHE_LOCK = threading.RLock()
 
+def invalidate_response_cache():
+    with _RESPONSE_CACHE_LOCK:
+        _RESPONSE_CACHE.clear()
 
-
-def normalize_search(value):
-    """Retourne une version minuscule sans accents pour les recherches."""
-    text = str(value or "").casefold()
-    return "".join(
-        ch for ch in unicodedata.normalize("NFKD", text)
-        if not unicodedata.combining(ch)
-    )
-
-
-def visible_item_sql(alias="i"):
-    clauses = [f"LOWER({alias}.name) NOT LIKE ?" for _ in HIDDEN_NAME_PATTERNS]
-    return " AND ".join(clauses), [f"%{x}%" for x in HIDDEN_NAME_PATTERNS]
-
-
-def db():
-    con = sqlite3.connect(DB, timeout=30)
-    con.row_factory = sqlite3.Row
-    con.execute("PRAGMA foreign_keys=ON")
-    con.execute("PRAGMA busy_timeout=30000")
-    con.execute("PRAGMA synchronous=NORMAL")
-    return con
-
-
-def init_db():
-    con = db()
-    cur = con.cursor()
-    cur.execute("PRAGMA journal_mode=WAL")
-    cur.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS items(
-            id INTEGER PRIMARY KEY,
-            name TEXT NOT NULL,
-            name_en TEXT,
-            name_search TEXT,
-            level INTEGER,
-            category TEXT,
-            subtype TEXT,
-            image TEXT
-        );
-        CREATE TABLE IF NOT EXISTS recipes(
-            output_id INTEGER NOT NULL,
-            ingredient_id INTEGER NOT NULL,
-            quantity INTEGER NOT NULL,
-            PRIMARY KEY(output_id, ingredient_id)
-        );
-        CREATE TABLE IF NOT EXISTS prices(
-            item_id INTEGER PRIMARY KEY,
-            p1 REAL,
-            p10 REAL,
-            p100 REAL,
-            updated_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS settings(
-            key TEXT PRIMARY KEY,
-            value TEXT
-        );
-        CREATE TABLE IF NOT EXISTS price_history(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            item_id INTEGER NOT NULL,
-            p1 REAL,
-            p10 REAL,
-            p100 REAL,
-            recorded_at TEXT NOT NULL DEFAULT (datetime('now','localtime'))
-        );
-        CREATE TABLE IF NOT EXISTS inventory(
-            item_id INTEGER PRIMARY KEY,
-            quantity INTEGER NOT NULL DEFAULT 0,
-            updated_at TEXT
-        );
-        CREATE INDEX IF NOT EXISTS idx_items_name ON items(name);
-        CREATE INDEX IF NOT EXISTS idx_items_category ON items(category);
-        CREATE INDEX IF NOT EXISTS idx_recipes_output ON recipes(output_id);
-        CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes(ingredient_id);
-        CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id,recorded_at);
-        """
-    )
-    columns = {r[1] for r in cur.execute("PRAGMA table_info(items)")}
-    if "name_search" not in columns:
-        cur.execute("ALTER TABLE items ADD COLUMN name_search TEXT")
-    cur.execute("CREATE INDEX IF NOT EXISTS idx_items_name_search ON items(name_search)")
-    if cur.execute("SELECT COUNT(*) FROM items").fetchone()[0] == 0 and NAMES.exists():
-        names = json.loads(NAMES.read_text(encoding="utf-8"))
-        cur.executemany(
-            "INSERT OR IGNORE INTO items(id,name,name_en,name_search) VALUES(?,?,?,?)",
-            [(int(k), v.get("name_fr", ""), v.get("name_en", ""), normalize_search(v.get("name_fr", ""))) for k, v in names.items()],
-        )
-    rows_to_normalize = cur.execute("SELECT id,name FROM items WHERE name_search IS NULL OR name_search=''").fetchall()
-    if rows_to_normalize:
-        cur.executemany("UPDATE items SET name_search=? WHERE id=?", [(normalize_search(r['name']), r['id']) for r in rows_to_normalize])
-    cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('sale_tax_rate','0.02')")
-    cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('sale_tax_enabled','1')")
-    cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('auto_refresh_enabled','0')")
-    cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('auto_refresh_seconds','120')")
-    cur.execute("INSERT OR IGNORE INTO settings(key,value) VALUES('auto_sync_enabled','0')")
-    # Migration performance V6.1 : une seule fois, afin d'éviter les recalculs et
-    # synchronisations lourdes au démarrage. L'utilisateur peut les réactiver ensuite.
-    migrated = cur.execute("SELECT value FROM settings WHERE key='performance_v61_migrated'").fetchone()
-    if not migrated:
-        cur.execute("INSERT INTO settings(key,value) VALUES('performance_v61_migrated','1')")
-        cur.execute("INSERT INTO settings(key,value) VALUES('auto_refresh_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'")
-        cur.execute("INSERT INTO settings(key,value) VALUES('auto_refresh_seconds','120') ON CONFLICT(key) DO UPDATE SET value='120'")
-        cur.execute("INSERT INTO settings(key,value) VALUES('auto_sync_enabled','0') ON CONFLICT(key) DO UPDATE SET value='0'")
-    con.commit()
-    con.close()
-
-
-
-
-def lot_purchase_plan(quantity, p1, p10, p100):
-    """Cheapest exact HDV lot combination for at least ``quantity`` units.
-
-    Lots only exist in sizes 1, 10 and 100. For a fixed number of x100 lots,
-    the remaining cost is linear in the number of x10 lots, so only the
-    endpoints (none, floor, ceil) need testing. This avoids the old quadratic
-    brute-force loop and stays exact.
-    """
-    quantity = max(int(quantity or 0), 0)
-    prices = {
-        1: float(p1) if p1 and p1 > 0 else None,
-        10: float(p10) if p10 and p10 > 0 else None,
-        100: float(p100) if p100 and p100 > 0 else None,
-    }
-    empty = {"quantity": quantity, "cost": None, "units": 0, "overbuy": 0,
-             "lots": {"x1": 0, "x10": 0, "x100": 0}}
-    if quantity <= 0:
-        return {**empty, "cost": 0.0, "label": "aucun achat", "options": []}
-
-    options = []
-    for size, key in ((1, "x1"), (10, "x10"), (100, "x100")):
-        price = prices[size]
-        if price is not None:
-            count = (quantity + size - 1) // size
-            units = count * size
-            options.append({"type": key, "lots": count, "units": units,
-                            "overbuy": units - quantity, "cost": count * price})
-
-    best = None
-    max100 = (quantity + 99) // 100 + (1 if prices[100] is not None else 0)
-    n100_values = range(max100 + 1) if prices[100] is not None else (0,)
-    for n100 in n100_values:
-        remaining = max(quantity - n100 * 100, 0)
-        floor10 = remaining // 10
-        ceil10 = (remaining + 9) // 10
-        n10_values = {0, floor10, ceil10}
-        if prices[10] is None:
-            n10_values = {0}
-        for n10 in n10_values:
-            units_10_100 = n100 * 100 + n10 * 10
-            n1 = max(quantity - units_10_100, 0)
-            if n1 and prices[1] is None:
-                continue
-            total_units = units_10_100 + n1
-            if total_units < quantity:
-                continue
-            cost = (n100 * (prices[100] or 0.0) +
-                    n10 * (prices[10] or 0.0) +
-                    n1 * (prices[1] or 0.0))
-            candidate = (cost, total_units - quantity, n100 + n10 + n1,
-                         n1, n10, n100)
-            if best is None or candidate < best[0]:
-                best = (candidate, {"quantity": quantity, "cost": cost,
-                                    "units": total_units,
-                                    "overbuy": total_units - quantity,
-                                    "lots": {"x1": n1, "x10": n10, "x100": n100}})
-
-    result = best[1] if best else empty
-    parts = []
-    for key in ("x100", "x10", "x1"):
-        count = result["lots"].get(key, 0)
-        if count:
-            parts.append(f'{count} lot{"s" if count > 1 else ""} {key}')
-    result["label"] = " + ".join(parts) if parts else "prix manquant"
-    result["options"] = options
-    return result
-
-def best_unit(row):
-    values = []
-    if row and row["p1"] not in (None, 0):
-        values.append((float(row["p1"]), "x1"))
-    if row and row["p10"] not in (None, 0):
-        values.append((float(row["p10"]) / 10, "x10"))
-    if row and row["p100"] not in (None, 0):
-        values.append((float(row["p100"]) / 100, "x100"))
-    return min(values) if values else (None, None)
-
-
-def get_setting(con, key, default=None):
-    row = con.execute("SELECT value FROM settings WHERE key=?", (key,)).fetchone()
-    return row[0] if row else default
-
-
-def tax_rate(con):
-    try:
-        return max(0.0, min(float(get_setting(con, "sale_tax_rate", "0.02")), 1.0))
-    except (TypeError, ValueError):
-        return 0.02
-
-
-def _build_engine(con):
-    price_rows = {r["item_id"]: r for r in con.execute("SELECT * FROM prices")}
-    unit_prices = {item_id: best_unit(row)[0] for item_id, row in price_rows.items()}
-    recipes = {}
-    for r in con.execute("SELECT output_id,ingredient_id,quantity FROM recipes"):
-        recipes.setdefault(r["output_id"], []).append((r["ingredient_id"], r["quantity"]))
-
-    memo = {}
-    visiting = set()
-
-    def calc(item_id):
-        if item_id in memo:
-            return memo[item_id]
-        buy = unit_prices.get(item_id)
-        recipe = recipes.get(item_id)
-        if item_id in visiting or not recipe:
-            result = {
-                "buy": buy,
-                "craft": None,
-                "best": buy,
-                "mode": "acheter" if buy is not None else None,
-                "complete": buy is not None,
-            }
-            memo[item_id] = result
-            return result
-
-        visiting.add(item_id)
-        total = 0.0
-        complete = True
-        for ingredient_id, quantity in recipe:
-            ingredient = calc(ingredient_id)
-            if ingredient["best"] is None:
-                complete = False
-                break
-            total += ingredient["best"] * quantity
-        visiting.remove(item_id)
-
-        craft = total if complete else None
-        candidates = [(buy, "acheter"), (craft, "fabriquer")]
-        candidates = [x for x in candidates if x[0] is not None]
-        best, mode = min(candidates, key=lambda x: x[0]) if candidates else (None, None)
-        result = {
-            "buy": buy,
-            "craft": craft,
-            "best": best,
-            "mode": mode,
-            "complete": complete,
-        }
-        memo[item_id] = result
-        return result
-
-    calc_lock = threading.RLock()
-    unsafe_calc = calc
-    def safe_calc(item_id):
-        with calc_lock:
-            return unsafe_calc(item_id)
-    return safe_calc, unit_prices, recipes
-
-_ENGINE_LOCK = threading.RLock()
-_ENGINE_CACHE = None
-_ENGINE_GENERATION = 0
-
-
-def invalidate_engine():
-    global _ENGINE_CACHE, _ENGINE_GENERATION
-    with _ENGINE_LOCK:
-        _ENGINE_GENERATION += 1
-        _ENGINE_CACHE = None
-
-
-def build_engine(con):
-    global _ENGINE_CACHE
-    with _ENGINE_LOCK:
-        if _ENGINE_CACHE is None:
-            _ENGINE_CACHE = (_ENGINE_GENERATION, _build_engine(con))
-        return _ENGINE_CACHE[1]
-
-
-def fetch_json(url):
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "DofusCraftManager-Salar/5.0",
-            "Accept": "application/json",
-            "Accept-Encoding": "identity",
-        },
-    )
-    with urllib.request.urlopen(request, timeout=240) as response:
-        return json.loads(response.read().decode("utf-8"))
-
-
-class Progress(dict):
-    lock = threading.Lock()
-
-    def update_safe(self, **kwargs):
-        with self.lock:
-            super().update(**kwargs)
-
-
-progress = Progress(status="idle", message="Prêt", percent=0)
-
-
-def sync_data():
-    con = db()
-    cur = con.cursor()
-    try:
-        for index, item_type in enumerate(TYPES, start=1):
-            progress.update_safe(
-                status="running",
-                message=f"Téléchargement : {item_type}",
-                percent=int((index - 1) / len(TYPES) * 100),
-            )
-            query = urllib.parse.urlencode({"page[size]": -1, "fields[item]": "recipe"})
-            payload = fetch_json(f"{API_BASE}/{item_type}?{query}")
-            rows = payload.get("items", payload if isinstance(payload, list) else [])
-            for item in rows:
-                item_id = item.get("ankama_id")
-                if item_id is None:
-                    continue
-                item_kind = item.get("type") or {}
-                image = (item.get("image_urls") or {}).get("icon")
-                cur.execute(
-                    """
-                    INSERT INTO items(id,name,name_search,level,category,subtype,image)
-                    VALUES(?,?,?,?,?,?,?)
-                    ON CONFLICT(id) DO UPDATE SET
-                        name=excluded.name,
-                        name_search=excluded.name_search,
-                        level=excluded.level,
-                        category=excluded.category,
-                        subtype=excluded.subtype,
-                        image=excluded.image
-                    """,
-                    (
-                        item_id,
-                        item.get("name", ""),
-                        normalize_search(item.get("name", "")),
-                        item.get("level"),
-                        item_type,
-                        item_kind.get("name") or item_kind.get("name_id"),
-                        image,
-                    ),
-                )
-                cur.execute("DELETE FROM recipes WHERE output_id=?", (item_id,))
-                for recipe_line in item.get("recipe") or []:
-                    ingredient_id = recipe_line.get("item_ankama_id")
-                    quantity = recipe_line.get("quantity")
-                    if ingredient_id is not None and quantity:
-                        cur.execute(
-                            "INSERT OR REPLACE INTO recipes(output_id,ingredient_id,quantity) VALUES(?,?,?)",
-                            (item_id, ingredient_id, quantity),
-                        )
-            con.commit()
-        cur.execute(
-            "INSERT INTO settings(key,value) VALUES('last_sync',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-            (datetime.now().isoformat(timespec="seconds"),),
-        )
-        con.commit()
-        invalidate_engine()
-        progress.update_safe(status="done", message="Synchronisation terminée", percent=100)
-    except Exception as exc:
-        progress.update_safe(status="error", message=f"Erreur : {exc}", percent=0)
-    finally:
-        con.close()
-
-
-def craft_tree(con, item_id, quantity=1, depth=0, max_depth=8, path=None, engine=None):
-    path = set(path or set())
-    row = con.execute("SELECT id,name,level,category,subtype,image FROM items WHERE id=?", (item_id,)).fetchone()
-    if not row:
-        return {"id": item_id, "name": f"#{item_id}", "quantity": quantity, "missing": True}
-    calc, _, recipes = engine or build_engine(con)
-    cost = calc(item_id)
-    node = {**dict(row), "quantity": quantity, **cost, "children": []}
-    if depth >= max_depth or item_id in path:
-        node["truncated"] = True
-        return node
-    if cost["mode"] == "fabriquer" and item_id in recipes:
-        next_path = set(path)
-        next_path.add(item_id)
-        for ingredient_id, ingredient_qty in recipes[item_id]:
-            node["children"].append(
-                craft_tree(con, ingredient_id, quantity * ingredient_qty, depth + 1, max_depth, next_path, (calc, {}, recipes))
-            )
-    return node
-
-
-
-def make_workshop_context(con, use_inventory=True):
-    calc, _, recipes = build_engine(con)
-    item_rows = {r["id"]: dict(r) for r in con.execute(
-        "SELECT id,name,category,subtype,image FROM items"
-    )}
-    price_rows = {r["item_id"]: r for r in con.execute("SELECT * FROM prices")}
-    inventory = ({r["item_id"]: int(r["quantity"] or 0)
-                  for r in con.execute("SELECT item_id,quantity FROM inventory")}
-                 if use_inventory else {})
-    return {"calc": calc, "recipes": recipes, "item_rows": item_rows,
-            "price_rows": price_rows, "inventory": inventory}
-
-
-def build_workshop_plan(con, selections, use_inventory=True, context=None):
-    """Plan léger : stock, choix acheter/fabriquer et regroupement des achats."""
-    context = context or make_workshop_context(con, use_inventory)
-    calc = context["calc"]
-    recipes = context["recipes"]
-    item_rows = context["item_rows"]
-    price_rows = context["price_rows"]
-    available = dict(context["inventory"]) if use_inventory else {}
-    purchases, crafts, stock_used, missing = {}, {}, {}, {}
-    visiting=set()
-    def add(target,item_id,qty): target[item_id]=target.get(item_id,0)+int(qty)
-    def fulfill(item_id,qty,allow_stock=True):
-        qty=max(int(qty or 0),0)
-        if not qty:return
-        use=min(available.get(item_id,0),qty) if allow_stock else 0
-        if use: available[item_id]-=use;add(stock_used,item_id,use);qty-=use
-        if not qty:return
-        state=calc(item_id);recipe=recipes.get(item_id)
-        if item_id not in visiting and recipe and state.get('mode')=='fabriquer':
-            add(crafts,item_id,qty);visiting.add(item_id)
-            for ing,amount in recipe:fulfill(ing,qty*amount)
-            visiting.remove(item_id);return
-        row=price_rows.get(item_id)
-        old=purchases.get(item_id);total=qty+(old['quantity'] if old else 0)
-        plan=lot_purchase_plan(total,row['p1'] if row else None,row['p10'] if row else None,row['p100'] if row else None)
-        if plan.get('cost') is None:add(missing,item_id,qty)
-        else:purchases[item_id]=plan
-    for entry in selections or []:fulfill(int(entry.get('item_id') or 0),int(entry.get('quantity') or 0),False)
-    def decorate(mapping):
-        return sorted([{**item_rows.get(i,{'name':f'#{i}'}),'item_id':i,'quantity':q} for i,q in mapping.items()],key=lambda x:x.get('name',''))
-    buy=[];total=0.0
-    for i,plan in purchases.items():
-        total+=float(plan.get('cost') or 0);buy.append({**item_rows.get(i,{'name':f'#{i}'}),'item_id':i,**plan})
-    buy.sort(key=lambda x:x.get('name',''))
-    rate = tax_rate(con) if get_setting(con, 'sale_tax_enabled', '1') != '0' else 0.0
-    gross_sale = 0.0
-    total_output_quantity = 0
-    missing_sales = {}
-    for entry in selections or []:
-        output_id = int(entry.get('item_id') or 0)
-        output_qty = max(int(entry.get('quantity') or 0), 0)
-        if not output_id or not output_qty:
-            continue
-        total_output_quantity += output_qty
-        sale_unit = best_unit(price_rows.get(output_id))[0]
-        if sale_unit is None:
-            add(missing_sales, output_id, output_qty)
-        else:
-            gross_sale += sale_unit * output_qty
-    sale_tax = gross_sale * rate
-    net_sale = gross_sale - sale_tax
-    profit = net_sale - total if not missing and not missing_sales else None
-    roi = profit / total * 100 if profit is not None and total > 0 else None
-    average_profit = profit / total_output_quantity if profit is not None and total_output_quantity else None
-    complete = not bool(missing) and not bool(missing_sales)
-    return {'purchases':buy,'crafts':decorate(crafts),'stock_used':decorate(stock_used),'missing':decorate(missing),
-            'missing_sales':decorate(missing_sales),'total_cost':total,'gross_sale':gross_sale,'sale_tax':sale_tax,
-            'net_sale':net_sale,'profit':profit,'roi':roi,'average_profit':average_profit,
-            'total_output_quantity':total_output_quantity,'complete':complete,'tax_rate':rate}
-
-
-def strict_budget_plan(con, item_id, budget, estimated_unit_cost, context):
-    """Maximum quantity whose real HDV lot purchases stay within the budget."""
-    budget = max(float(budget or 0), 0.0)
-    if budget <= 0 or not estimated_unit_cost or estimated_unit_cost <= 0:
-        return 0, 0.0
-
-    # The theoretical unit cost is a lower bound; it gives a safe search ceiling.
-    high = max(int(budget // estimated_unit_cost), 0)
-    if high <= 0:
-        return 0, 0.0
-
-    cost_cache = {}
-    def real_cost(quantity):
-        if quantity not in cost_cache:
-            plan = build_workshop_plan(con, [{"item_id": item_id, "quantity": quantity}], use_inventory=False, context=context)
-            cost_cache[quantity] = float(plan["total_cost"]) if plan.get("complete") else None
-        return cost_cache[quantity]
-
-    low = 0
-    best_cost = 0.0
-    while low < high:
-        mid = (low + high + 1) // 2
-        cost = real_cost(mid)
-        if cost is not None and cost <= budget:
-            low = mid
-            best_cost = cost
-        else:
-            high = mid - 1
-    if low and not best_cost:
-        best_cost = real_cost(low) or 0.0
-    return low, best_cost
+def cached_response(key, producer):
+    generation = engine_generation()
+    cache_key = (generation, key)
+    with _RESPONSE_CACHE_LOCK:
+        if cache_key in _RESPONSE_CACHE:
+            return _RESPONSE_CACHE[cache_key]
+    value = producer()
+    with _RESPONSE_CACHE_LOCK:
+        _RESPONSE_CACHE.clear() if len(_RESPONSE_CACHE) > 32 else None
+        _RESPONSE_CACHE[cache_key] = value
+    return value
 
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
@@ -970,6 +484,7 @@ class Handler(SimpleHTTPRequestHandler):
             con.execute("INSERT INTO price_history(item_id,p1,p10,p100) VALUES(?,?,?,?)", (item_id, *values))
             con.commit()
             invalidate_engine()
+            invalidate_response_cache()
             row = con.execute("SELECT * FROM prices WHERE item_id=?", (item_id,)).fetchone()
             unit, lot = best_unit(row)
             con.close()
@@ -979,7 +494,7 @@ class Handler(SimpleHTTPRequestHandler):
             data=self.read_json();item_id=int(data.get("item_id") or 0);quantity=max(int(data.get("quantity") or 0),0);con=db()
             if quantity: con.execute("INSERT INTO inventory(item_id,quantity,updated_at) VALUES(?,?,datetime('now','localtime')) ON CONFLICT(item_id) DO UPDATE SET quantity=excluded.quantity,updated_at=excluded.updated_at",(item_id,quantity))
             else: con.execute("DELETE FROM inventory WHERE item_id=?",(item_id,))
-            con.commit();con.close();return self.send_json({"ok":True,"item_id":item_id,"quantity":quantity})
+            con.commit();con.close();invalidate_response_cache();return self.send_json({"ok":True,"item_id":item_id,"quantity":quantity})
 
         if url.path == "/api/workshop-plan":
             data=self.read_json();con=db()
@@ -1014,6 +529,7 @@ class Handler(SimpleHTTPRequestHandler):
                 auto_sync_enabled = "1" if bool(data.get("auto_sync_enabled")) else "0"
                 con.execute("INSERT INTO settings(key,value) VALUES('auto_sync_enabled',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (auto_sync_enabled,))
             con.commit(); con.close()
+            invalidate_response_cache()
             return self.send_json({"ok": True, "sale_tax_enabled": enabled == "1", "sale_tax_rate": rate})
 
         if url.path == "/api/import-prices":
@@ -1030,6 +546,7 @@ class Handler(SimpleHTTPRequestHandler):
             )
             con.commit()
             invalidate_engine()
+            invalidate_response_cache()
             con.close()
             return self.send_json({"ok": True, "count": len(rows)})
 
@@ -1037,6 +554,7 @@ class Handler(SimpleHTTPRequestHandler):
             if progress.get("status") == "running":
                 return self.send_json({"ok": False, "message": "Synchronisation déjà en cours"}, 409)
             progress.update_safe(status="running", message="Démarrage", percent=0)
+            invalidate_response_cache()
             threading.Thread(target=sync_data, daemon=True).start()
             return self.send_json({"ok": True})
 
@@ -1048,6 +566,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V6.1 Performance")
+    print("Dofus Craft Manager V6.2 Architecture & Performance")
     print("Ouvre http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
