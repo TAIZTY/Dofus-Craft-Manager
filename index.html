@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <title>Dofus Craft Manager — Salar V5.5</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">DC</div>
+      <div><strong>Dofus Craft Manager</strong><small>Salar · V5.5</small></div>
+    </div>
+
+    <nav class="side-nav" aria-label="Navigation principale">
+      <button class="tab active" data-page="dashboard"><span>⌂</span><b>Dashboard</b></button>
+      <button class="tab" data-page="crafts"><span>⚒</span><b>Crafts</b></button>
+      <button class="tab" data-page="prices"><span>₭</span><b>Prix HDV</b></button>
+      <button class="tab" data-page="shopping"><span>☷</span><b>Liste de courses</b></button>
+      <button class="tab" data-page="workshop"><span>▦</span><b>Atelier</b></button>
+      <button class="tab" data-page="opportunities"><span>✦</span><b>Opportunités & Conseiller</b></button>
+      <button class="tab" data-page="priorities"><span>◎</span><b>Prix prioritaires</b></button>
+      <button class="tab" data-page="scanner"><span>▣</span><b>Scan HDV</b></button>
+      <button class="tab" data-page="history"><span>↺</span><b>Historique</b></button>
+      <button class="tab" data-page="backup"><span>⤓</span><b>Sauvegarde</b></button>
+    </nav>
+
+    <div class="sidebar-card">
+      <div class="status-line"><i id="syncDot"></i><span id="syncStatus">Initialisation…</span></div>
+      <div class="progress"><span id="syncProgress"></span></div>
+      <small id="lastSync">Aucune synchronisation</small>
+      <button id="sync" class="secondary full">Synchroniser les recettes</button>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">APPLICATION PRIVÉE ET LOCALE</p>
+        <h1 id="pageTitle">Dashboard</h1>
+      </div>
+      <div class="top-actions">
+        <button id="quickPrices" class="ghost">Saisir des prix</button>
+        <button id="quickCrafts">Voir les crafts</button>
+      </div>
+    </header>
+
+    <main>
+      <section id="dashboard" class="page active">
+        <div class="hero">
+          <div>
+            <span class="pill">Moteur de calcul validé</span>
+            <h2>Analyse la rentabilité de tes crafts sur Salar.</h2>
+            <p>Renseigne progressivement tes prix HDV. Le moteur compare automatiquement l’achat direct et la fabrication imbriquée.</p>
+            <div class="hero-actions">
+              <button class="go-page" data-target="prices">Mettre à jour les prix</button>
+              <button class="go-page secondary" data-target="crafts">Explorer les crafts</button>
+            </div>
+          </div>
+          <div class="hero-orb"><span>₭</span><small>Optimisation locale</small></div>
+        </div>
+
+        <div class="stat-grid">
+          <article class="stat-card"><div class="stat-icon">◈</div><div><b id="sItems">—</b><span>objets indexés</span></div></article>
+          <article class="stat-card"><div class="stat-icon">⚒</div><div><b id="sRecipes">—</b><span>recettes synchronisées</span></div></article>
+          <article class="stat-card"><div class="stat-icon">₭</div><div><b id="sPrices">—</b><span>prix renseignés</span></div></article>
+          <article class="stat-card"><div class="stat-icon">↗</div><div><b id="sProfitable">—</b><span>crafts rentables</span></div></article>
+        </div>
+
+        <div class="dashboard-grid">
+          <section class="panel wide-panel">
+            <div class="panel-head"><div><span class="kicker">CLASSEMENT</span><h2>Meilleurs bénéfices</h2></div><button class="link go-page" data-target="crafts">Tout afficher →</button></div>
+            <div id="topCrafts" class="compact-table"></div>
+          </section>
+          <section class="panel wide-panel">
+            <div class="panel-head"><div><span class="kicker">RENDEMENT</span><h2>Meilleurs ROI</h2></div><button class="link go-page" data-target="crafts">Tout afficher →</button></div>
+            <div id="topRoi" class="compact-table"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="crafts" class="page">
+        <div class="section-intro">
+          <div><span class="kicker">ANALYSE</span><h2>Tous les crafts</h2><p>Filtre les recettes, puis ouvre une ligne pour voir la recette directe et l’arbre optimisé.</p></div>
+          <div class="badge">Calcul récursif actif</div>
+        </div>
+        <div class="craft-view-tabs"><button class="secondary active" data-craft-view="profitable">Rentables maintenant</button><button class="secondary" data-craft-view="complete">Calculables</button><button class="secondary" data-craft-view="all">Tous les crafts</button></div>
+        <div class="filter-card">
+          <div class="search-wrap"><span>⌕</span><input id="craftSearch" placeholder="Rechercher un craft…" autocomplete="off"></div>
+          <select id="craftCategory"><option value="">Toutes catégories</option></select>
+          <div class="range-pair"><input id="minLevel" type="number" min="0" max="200" value="0" title="Niveau minimum"><span>à</span><input id="maxLevel" type="number" min="0" max="200" value="200" title="Niveau maximum"></div>
+          <select id="craftSort"><option value="profit">Bénéfice</option><option value="roi">ROI</option><option value="level">Niveau</option><option value="name">Nom</option></select>
+          <label class="check"><input id="onlyComplete" type="checkbox" checked><span>Prix complets</span></label>
+          <label class="check"><input id="onlyProfitable" type="checkbox" checked><span>Rentables</span></label>
+          <button id="craftGo">Appliquer</button>
+        </div>
+        <div id="craftList" class="data-table"></div>
+      </section>
+
+      <section id="prices" class="page">
+        <div class="section-intro">
+          <div><span class="kicker">MARCHÉ</span><h2>Prix HDV — Salar</h2><p>Les prix sont sauvegardés automatiquement. Le meilleur prix unitaire est calculé entre x1, x10 et x100.</p></div>
+          <div class="inline-stats"><div><b id="priceCount">—</b><span>renseignés</span></div><div><b id="priceShown">—</b><span>affichés</span></div></div>
+        </div>
+        <div class="filter-card price-filter">
+          <div class="search-wrap"><span>⌕</span><input id="priceSearch" placeholder="Fer, Ferrite, Bois d'Orme…" autocomplete="off"></div>
+          <select id="priceView"><option value="recent">Prix récemment modifiés</option><option value="useful">Ingrédients utiles aux crafts</option><option value="missing">Prix manquants pour les crafts</option><option value="all">Tous les objets visibles</option></select>
+          <select id="priceCategory"><option value="">Toutes catégories</option><option value="resources">Ressources</option><option value="equipment">Équipements</option><option value="consumables">Consommables</option></select>
+          <button id="priceGo">Afficher</button>
+        </div>
+        <div class="info-strip"><span>● Sauvegarde automatique</span><span>● Meilleur lot détecté</span><span>● Données stockées localement</span><strong id="priceMessage"></strong></div>
+        <div id="priceList" class="price-table"></div>
+      </section>
+
+
+      <section id="shopping" class="page">
+        <div class="section-intro"><div><span class="kicker">PLANIFICATION</span><h2>Liste de courses</h2><p>Ajoute un craft depuis sa fiche. L'application additionne les ressources terminales selon le chemin acheter/fabriquer optimal.</p></div><button id="clearShopping" class="secondary">Vider la liste</button></div>
+        <div class="filter-card"><div class="search-wrap"><span>⌕</span><input id="shoppingSearch" placeholder="Rechercher un craft à ajouter…" autocomplete="off"></div><input id="shoppingQty" type="number" min="1" value="1" title="Quantité"><button id="shoppingAdd">Ajouter</button></div>
+        <div id="shoppingMatches" class="compact-table"></div>
+        <div class="dashboard-grid"><section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">SÉLECTION</span><h2>Crafts demandés</h2></div></div><div id="shoppingSelected"></div></section><section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">ACHATS</span><h2>Ressources à acheter</h2></div><button id="copyShopping" class="link">Copier</button></div><div id="shoppingResult"></div></section></div>
+      </section>
+
+      <section id="workshop" class="page">
+        <div class="section-intro"><div><span class="kicker">PRODUCTION</span><h2>Atelier</h2><p>Prépare plusieurs crafts et déduis directement les ressources déjà en stock.</p></div><div class="badge">Chargement à la demande</div></div>
+        <div class="workshop-grid">
+          <section class="panel">
+            <div class="panel-head"><div><span class="kicker">OBJECTIFS</span><h2>Objets à fabriquer</h2></div><button id="workshopClear" class="secondary">Tout vider</button></div>
+            <div class="filter-card workshop-add"><div class="search-wrap"><span>⌕</span><input id="workshopCraftSearch" placeholder="Rechercher un craft…" autocomplete="off"></div><input id="workshopCraftQty" type="number" min="1" value="1"><button id="workshopAddCraft" disabled>Ajouter</button></div>
+            <div id="workshopCraftSelected" class="selected-item hidden"></div>
+            <div id="workshopCraftMatches" class="compact-table"></div>
+            <div id="workshopSelection" class="workshop-list"></div>
+          </section>
+          <section class="panel">
+            <div class="panel-head"><div><span class="kicker">INVENTAIRE</span><h2>Mise en stock</h2></div><button id="workshopInventoryRefresh" class="link">Actualiser</button></div>
+            <div class="filter-card workshop-add"><div class="search-wrap"><span>⌕</span><input id="inventorySearch" placeholder="Rechercher une ressource…" autocomplete="off"></div><input id="inventoryQty" type="number" min="0" value="1"><button id="inventoryAdd" disabled>Ajouter au stock</button></div>
+            <div id="inventorySelected" class="selected-item hidden"></div>
+            <div id="inventoryMatches" class="compact-table"></div>
+            <div id="inventoryList" class="workshop-list"></div>
+          </section>
+        </div>
+        <div class="workshop-actions"><button id="workshopCalculate">Calculer le plan</button><span id="workshopState"></span></div>
+        <div class="dashboard-grid workshop-results">
+          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">ACHATS HDV</span><h2>Liste d’achats optimisée</h2></div><button id="workshopCopy" class="link">Copier</button></div><div id="workshopPurchases"></div></section>
+          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">SOUS-CRAFTS</span><h2>Ordre de fabrication</h2></div></div><div id="workshopCraftSteps"></div></section>
+          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">STOCK</span><h2>Inventaire utilisé</h2></div></div><div id="workshopStockUsed"></div></section>
+          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">BILAN</span><h2>Résumé</h2></div></div><div id="workshopSummary"></div></section>
+        </div>
+      </section>
+
+      <section id="opportunities" class="page">
+        <div class="section-intro"><div><span class="kicker">DÉCISION</span><h2>Opportunités & Conseiller</h2><p>Classements nets après taxe et recommandations personnalisées selon ton budget.</p></div><div class="badge" id="oppCount">— opportunités</div></div>
+        <div class="filter-card"><label>Budget <input id="oppBudget" class="money-field" value="5 000 000"></label><button id="oppRefresh">Analyser</button></div>
+        <section class="panel advisor-panel"><div class="panel-head"><div><span class="kicker">CONSEILLER</span><h2>Recommandations</h2></div></div><div id="advisorText" class="advisor-text"></div></section>
+        <div class="craft-view-tabs" id="oppTabs"><button class="secondary active" data-opp-view="budget_best">Meilleur avec budget</button><button class="secondary" data-opp-view="top_profit">Bénéfice unitaire</button><button class="secondary" data-opp-view="top_roi">ROI</button><button class="secondary" data-opp-view="low_budget">Petit budget</button><button class="secondary" data-opp-view="high_budget">Gros budget</button></div>
+        <div id="opportunityList" class="data-table"></div>
+      </section>
+
+      <section id="priorities" class="page">
+        <div class="section-intro"><div><span class="kicker">COUVERTURE</span><h2>Prix manquants prioritaires</h2><p>Relève d’abord les prix qui débloquent le plus de crafts.</p></div><button id="priorityRefresh" class="secondary">Recalculer</button></div>
+        <div id="prioritySummary" class="info-strip"></div><div id="priorityList" class="data-table"></div>
+      </section>
+
+      <section id="scanner" class="page">
+        <div class="section-intro"><div><span class="kicker">SAISIE ASSISTÉE</span><h2>Scan HDV</h2><p>Colle ou importe une capture, puis confirme l’objet et les prix avant enregistrement.</p></div><div class="badge">Validation obligatoire</div></div>
+        <div class="scanner-grid"><section class="panel"><div id="scanDrop" class="scan-drop" tabindex="0"><b>Dépose une capture ici</b><span>ou clique pour choisir une image</span><input id="scanFile" type="file" accept="image/*" hidden></div><img id="scanPreview" class="scan-preview hidden" alt="Capture HDV"></section>
+        <section class="panel"><div class="search-wrap"><span>⌕</span><input id="scanItemSearch" placeholder="Nom de l’objet…" autocomplete="off"></div><div id="scanMatches" class="scan-matches"></div><input id="scanItemId" type="hidden"><div class="scan-prices"><label>Prix x1<input id="scanP1" class="money-field"></label><label>Prix x10<input id="scanP10" class="money-field"></label><label>Prix x100<input id="scanP100" class="money-field"></label></div><button id="scanSave">Valider et enregistrer</button><p id="scanMessage"></p><small class="muted">Cette version affiche la capture à côté de la saisie pour éviter les erreurs. La reconnaissance automatique du texte sera ajoutée après calibration sur tes captures réelles.</small></section></div>
+      </section>
+
+      <section id="history" class="page">
+        <div class="section-intro"><div><span class="kicker">SUIVI</span><h2>Historique des prix</h2><p>Chaque modification de prix est conservée localement.</p></div><button id="refreshHistory" class="secondary">Actualiser</button></div>
+        <div class="filter-card"><div class="search-wrap"><span>⌕</span><input id="historySearch" placeholder="Filtrer par objet…" autocomplete="off"></div></div>
+        <div id="historyList" class="data-table"></div>
+        <section class="panel diagnostics-panel"><div class="panel-head"><div><span class="kicker">CONTRÔLE</span><h2>Diagnostic des données</h2></div><button id="runDiagnostics" class="link">Analyser</button></div><div id="diagnosticsBody" class="diagnostic-grid"></div></section>
+      </section>
+
+      <section id="backup" class="page">
+        <div class="section-intro"><div><span class="kicker">SÉCURITÉ</span><h2>Sauvegarde et transfert</h2><p>Protège ta base de prix ou transfère-la vers une autre installation.</p></div></div>
+        <div class="backup-grid">
+          <article class="action-card"><span class="action-icon">◫</span><h3>Sauvegarde locale</h3><p>Crée une copie horodatée de la base SQLite.</p><button id="backupBtn">Créer la sauvegarde</button></article>
+          <article class="action-card"><span class="action-icon">{ }</span><h3>Exporter les prix</h3><p>Exporte tes relevés au format JSON ou CSV.</p><div class="button-row"><button id="exportBtn">JSON</button><button id="exportCsvBtn" class="secondary">CSV</button></div></article>
+          <article class="action-card"><span class="action-icon">⇧</span><h3>Importer</h3><p>Réimporte une sauvegarde JSON de tes prix.</p><label class="file-button">Choisir un fichier<input id="importFile" type="file" accept="application/json"></label></article>
+        </div>
+        <section class="panel settings-panel"><div class="panel-head"><div><span class="kicker">CALCUL</span><h2>Taxe de vente</h2></div></div><div class="settings-row"><label class="check"><input id="taxEnabled" type="checkbox" checked><span>Prendre en compte la taxe HDV</span></label><label>Taux (%) <input id="taxRate" type="number" min="0" max="100" step="0.1" value="2.0"></label><button id="saveSettings">Enregistrer</button><strong id="settingsMessage"></strong></div><p>Les bénéfices et ROI affichés dans les Crafts et le Dashboard sont calculés après déduction de cette taxe.</p></section>
+        <section class="panel settings-panel"><div class="panel-head"><div><span class="kicker">ACTUALISATION</span><h2>Mise à jour automatique</h2></div></div><div class="settings-row"><label class="check"><input id="autoRefreshEnabled" type="checkbox" checked><span>Actualiser automatiquement les écrans</span></label><label>Intervalle (s) <input id="autoRefreshSeconds" type="number" min="10" max="300" step="5" value="30"></label><label class="check"><input id="autoSyncEnabled" type="checkbox" checked><span>Synchroniser les recettes si elles datent de plus de 24 h</span></label><button id="saveAutoSettings">Enregistrer</button><strong id="autoSettingsMessage"></strong></div><p>L’actualisation se met en pause pendant une saisie afin de ne jamais effacer ce que tu tapes.</p></section>
+        <div class="panel storage-note"><b>Emplacement local</b><code>data/dofus_salar.sqlite</code><p id="backupMessage"></p></div>
+      </section>
+    </main>
+
+    <footer><span>Dofus Craft Manager V5.3</span><span>Serveur Salar · fonctionnement local</span></footer>
+  </div>
+</div>
+
+<div id="recipeModal" class="modal hidden">
+  <div class="modalbox">
+    <button id="closeModal" class="close" aria-label="Fermer">×</button>
+    <span class="kicker">DÉTAIL DU CRAFT</span>
+    <h2 id="recipeTitle"></h2>
+    <div id="recipeSummary"></div><div class="modal-actions"><input id="modalQty" type="number" min="1" value="1"><button id="addModalShopping">Ajouter à la liste de courses</button></div>
+    <div class="modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette directe</h3><small>Modifie les prix x1, x10 et x100 de tous les ingrédients puis enregistre en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
+  </div>
+</div>
+<script src="app.js?v=5.3"></script>
+</body>
+</html>
