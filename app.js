@@ -24,9 +24,10 @@ const pageNames = {dashboard:'Dashboard',crafts:'Crafts',prices:'Prix HDV',shopp
 let craftIngredientFilter = 0;
 let craftIngredientName = '';
 let autoRefreshTimer = null;
-let autoRefreshEnabled = true;
-let autoRefreshSeconds = 30;
+let autoRefreshEnabled = false;
+let autoRefreshSeconds = 120;
 let autoSyncEnabled = true;
+let analyticsDirty = true;
 
 async function api(url, options) {
   const response = await fetch(url, options);
@@ -190,7 +191,8 @@ function bindQuickPriceEditors() {
         const result = await api('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+box.dataset.itemId,p1:read('.qp1'),p10:read('.qp10'),p100:read('.qp100')})});
         if (!result.ok) throw new Error('Le serveur n’a pas confirmé la sauvegarde');
         state.textContent = '✓ Prix enregistré, recalcul en cours';
-        await Promise.all([loadStatus(), loadDashboard(), loadCrafts()]);
+        await loadStatus();
+        analyticsDirty=true;
         const recipe = currentRecipe;
         if (recipe) await openRecipe(recipe.id, recipe.name);
       } catch(e) {
@@ -219,7 +221,8 @@ function bindRecipePriceTable() {
     try {
       for (const row of rows) await saveRecipePriceRow(row);
       state.textContent = '✓ Tous les prix sont enregistrés. Craft recalculé.'; state.className='recipe-save-state good';
-      await Promise.all([loadStatus(),loadDashboard(),loadCrafts()]);
+      await loadStatus();
+      analyticsDirty=true;
       const recipe = currentRecipe; if (recipe) await openRecipe(recipe.id, recipe.name);
     } catch(e) { state.textContent='Erreur : '+e.message; state.className='recipe-save-state bad'; }
     finally { saveAll.disabled=false; }
@@ -253,7 +256,7 @@ async function savePriceRow(row, immediate=false) {
       row.querySelector('.unit-best').innerHTML = best ? `<b>${fmt(best.value)}</b><small>via ${best.label}</small>` : '<b>—</b><small>prix manquant</small>';
       row.classList.remove('saving'); row.classList.add('saved'); setTimeout(()=>row.classList.remove('saved'),800);
       $('#priceMessage').textContent = 'Prix sauvegardé · calculs actualisés'; setTimeout(()=>$('#priceMessage').textContent='',1600);
-      await Promise.allSettled([loadStatus(),loadDashboard(),loadCrafts()]);
+      await loadStatus(); analyticsDirty=true;
     } catch(e) { row.classList.remove('saving'); $('#priceMessage').textContent = 'Erreur : ' + e.message; }
   };
   if (immediate) execute(); else priceSaveTimers.set(id,setTimeout(execute,450));
@@ -341,6 +344,7 @@ async function loadCategories() {
 }
 async function loadDashboard() {
   const d = await api('/api/dashboard');
+  analyticsDirty=false;
   $('#sProfitable').textContent = Number(d.profitable || 0).toLocaleString('fr-FR');
   $('#topCrafts').innerHTML = craftRows(d.top_profit || []);
   $('#topRoi').innerHTML = craftRows(d.top_roi || []);
@@ -355,7 +359,7 @@ async function loadSettings(){
   if ($('#taxEnabled')) $('#taxEnabled').checked=!!s.sale_tax_enabled;
   if ($('#taxRate')) $('#taxRate').value=(Number(s.sale_tax_rate||0.02)*100).toFixed(1);
   autoRefreshEnabled = s.auto_refresh_enabled !== false;
-  autoRefreshSeconds = Number(s.auto_refresh_seconds||30);
+  autoRefreshSeconds = Number(s.auto_refresh_seconds||120);
   autoSyncEnabled = s.auto_sync_enabled !== false;
   if ($('#autoRefreshEnabled')) $('#autoRefreshEnabled').checked=autoRefreshEnabled;
   if ($('#autoRefreshSeconds')) $('#autoRefreshSeconds').value=autoRefreshSeconds;
@@ -374,7 +378,7 @@ async function saveSettings(){
 $('#saveSettings')?.addEventListener('click',saveSettings);
 async function saveAutoSettings(){
   autoRefreshEnabled=$('#autoRefreshEnabled').checked;
-  autoRefreshSeconds=Math.max(10,Math.min(Number($('#autoRefreshSeconds').value||30),300));
+  autoRefreshSeconds=Math.max(10,Math.min(Number($('#autoRefreshSeconds').value||120),300));
   autoSyncEnabled=$('#autoSyncEnabled').checked;
   await api('/api/settings',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({auto_refresh_enabled:autoRefreshEnabled,auto_refresh_seconds:autoRefreshSeconds,auto_sync_enabled:autoSyncEnabled})});
   startAutoRefresh();
@@ -388,7 +392,7 @@ $('#importFile').onchange = async e => { if(!e.target.files[0]) return; const ro
 (async function init() {
   try {
     const [status] = await Promise.all([loadStatus(),loadCategories(),loadPrices(''),loadSettings()]);
-    await Promise.all([loadDashboard(),loadCrafts()]);
+    await loadDashboard();
     await maybeAutoSyncRecipes(status);
   } catch(e) {
     $('#syncStatus').textContent = 'Erreur de chargement';
@@ -433,17 +437,17 @@ async function loadHistory(){const rows=await api('/api/history?limit=250');cons
 $('#refreshHistory').onclick=loadHistory; $('#historySearch').oninput=loadHistory;
 async function runDiagnostics(){const d=await api('/api/diagnostics');$('#diagnosticsBody').innerHTML=`<article><b class="${d.ok?'good':'bad'}">${d.ok?'Données cohérentes':'Anomalies détectées'}</b><span>État global</span></article><article><b>${d.priced_items}</b><span>objets tarifés</span></article><article><b>${d.hidden_items}</b><span>objets techniques masqués</span></article><article><b class="${d.recipes_without_output?'bad':'good'}">${d.recipes_without_output}</b><span>recettes sans objet</span></article><article><b class="${d.ingredients_without_item?'bad':'good'}">${d.ingredients_without_item}</b><span>ingrédients inconnus</span></article><article><b>${d.crafts_without_any_price}</b><span>crafts sans prix de vente</span></article>`;}
 $('#runDiagnostics').onclick=runDiagnostics;
-renderShopping(); loadHistory(); runDiagnostics();
+renderShopping();
 
 $$('[data-open-ranking]').forEach(btn => btn.onclick = () => openCraftRanking(btn.dataset.openRanking || 'profit'));
 
 
-// ---- V5 : Opportunités et priorités ----
+// ---- Opportunités et prix prioritaires ----
 let opportunityData=null, opportunityView='budget_best';
 function opportunityRows(items){
-  const head='<div class="row header opportunity-row"><span>Objet</span><span>Coût optimal</span><span>Bénéfice net/u</span><span>ROI net</span><span>Quantité budget</span><span>Bénéfice budget</span><span>Confiance</span></div>';
+  const head='<div class="row header opportunity-row"><span>Objet</span><span>Coût optimal</span><span>Bénéfice net/u</span><span>ROI net</span><span>Quantité budget</span><span>Dépense réelle</span><span>Bénéfice budget</span><span>Confiance</span></div>';
   if(!items?.length) return head+'<div class="empty">Aucune opportunité calculable avec les prix actuels.</div>';
-  return head+items.map(x=>`<div class="row opportunity-row craft-row" data-id="${x.id}" data-name="${esc(x.name)}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><span>${fmt(x.best)}</span><span class="good">${fmt(x.profit)}</span><span>${pct(x.roi)}</span><span>${Number(x.budget_qty||0).toLocaleString('fr-FR')}</span><span class="good">${fmt(x.budget_profit)}</span><span>${Math.round(x.confidence||0)} %</span></div>`).join('');
+  return head+items.map(x=>`<div class="row opportunity-row craft-row" data-id="${x.id}" data-name="${esc(x.name)}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><span>${fmt(x.best)}</span><span class="good">${fmt(x.profit)}</span><span>${pct(x.roi)}</span><span>${Number(x.budget_qty||0).toLocaleString('fr-FR')}</span><span>${fmt(x.budget_spend)}</span><span class="good">${fmt(x.budget_profit)}</span><span>${Math.round(x.confidence||0)} %</span></div>`).join('');
 }
 async function loadOpportunities(){
   const budget=parseMoney($('#oppBudget')?.value)||5000000;
@@ -471,7 +475,21 @@ $('#priorityRefresh')?.addEventListener('click',loadPriorities);
 
 
 const oldRefreshVisiblePage=refreshVisiblePage;
-refreshVisiblePage=async function(showMessage=true){await oldRefreshVisiblePage(showMessage);const page=$('.page.active')?.id;if(page==='workshop')await loadWorkshopOnce();else if(page==='opportunities')await loadOpportunities();else if(page==='priorities')await loadPriorities();};
+refreshVisiblePage=async function(showMessage=true){
+  const page=$('.page.active')?.id;
+  // Navigation manuelle : charge uniquement la page ouverte, même si l'auto-actualisation est désactivée.
+  if(!showMessage){
+    if(page==='dashboard') await loadDashboard();
+    else if(page==='crafts') await loadCrafts();
+    else if(page==='prices') await loadPrices();
+    else if(page==='history'){await loadHistory();await runDiagnostics();}
+  } else {
+    await oldRefreshVisiblePage(showMessage);
+  }
+  if(page==='workshop')await loadWorkshopOnce();
+  else if(page==='opportunities')await loadOpportunities();
+  else if(page==='priorities')await loadPriorities();
+};
 
 
 
@@ -505,41 +523,34 @@ $('#workshopAddCraft')?.addEventListener('click',()=>{if(!selectedWorkshopCraft)
 $('#workshopClear')?.addEventListener('click',()=>{workshopSelection=[];saveWorkshopSelection();renderWorkshopPlan(null);});
 async function loadInventory(){
   const rows=await api('/api/inventory?limit=500');
-  $('#inventoryList').innerHTML=rows.length?rows.map(x=>`<div class="workshop-line inventory-line" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><input class="inventory-line-qty" type="number" min="0" value="${x.quantity}"><button class="secondary inventory-save">Mettre à jour</button><button class="ghost inventory-remove" title="Retirer du stock">Supprimer</button></div>`).join(''):'<div class="empty">Inventaire vide.</div>';
+  $('#inventoryList').innerHTML=rows.length?rows.map(x=>`<div class="workshop-line inventory-line" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><input class="inventory-line-qty" type="number" min="0" value="${x.quantity}"><div class="inventory-actions"><button class="secondary inventory-save">Mettre à jour</button><button class="inventory-remove">Supprimer</button></div></div>`).join(''):'<div class="empty">Inventaire vide.</div>';
   $$('#inventoryList .inventory-line').forEach(row=>{
-    const save=async(quantity)=>{await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+row.dataset.id,quantity:Math.max(0,+quantity||0)})});await loadInventory();};
-    row.querySelector('.inventory-save').onclick=()=>save(row.querySelector('.inventory-line-qty').value);
+    const save=async quantity=>{await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+row.dataset.id,quantity:Math.max(0,quantity)})});await loadInventory();};
+    row.querySelector('.inventory-save').onclick=()=>save(+row.querySelector('.inventory-line-qty').value||0);
     row.querySelector('.inventory-remove').onclick=()=>save(0);
-    row.querySelector('.inventory-line-qty').addEventListener('keydown',e=>{if(e.key==='Enter')save(e.currentTarget.value);});
+    row.querySelector('.inventory-line-qty').onkeydown=e=>{if(e.key==='Enter')save(+e.currentTarget.value||0)};
   });
-}
-let inventorySearchRows=[];
-function selectInventoryResult(index=0){
-  const item=inventorySearchRows[index]; if(!item)return;
-  selectedInventoryItem=item;
-  const buttons=$$('#inventoryMatches .workshop-match');buttons.forEach(x=>x.classList.remove('selected'));buttons[index]?.classList.add('selected');
-  showSelected('inventory',item);$('#inventoryQty').focus();$('#inventoryQty').select();
 }
 async function searchInventoryItems(){
   const q=$('#inventorySearch').value.trim();selectedInventoryItem=null;showSelected('inventory',null);
-  if(!q){inventorySearchRows=[];$('#inventoryMatches').innerHTML='';return;}
-  inventorySearchRows=await api('/api/item-search?q='+encodeURIComponent(q)+'&limit=12');
-  $('#inventoryMatches').innerHTML=inventorySearchRows.map(x=>`<button class="workshop-match" data-id="${x.id}" data-name="${esc(x.name)}"><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></button>`).join('');
-  $$('#inventoryMatches .workshop-match').forEach((b,i)=>{b.onclick=()=>selectInventoryResult(i);b.ondblclick=()=>{selectInventoryResult(i);$('#inventoryAdd').click();};});
+  if(!q){$('#inventoryMatches').innerHTML='';return;}
+  const rows=await api('/api/item-search?q='+encodeURIComponent(q)+'&limit=12');
+  $('#inventoryMatches').innerHTML=rows.map(x=>`<button class="workshop-match" data-id="${x.id}" data-name="${esc(x.name)}"><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></button>`).join('');
+  $$('#inventoryMatches .workshop-match').forEach((b,i)=>{
+    const select=()=>{selectedInventoryItem=rows[i];$$('#inventoryMatches .workshop-match').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');showSelected('inventory',selectedInventoryItem);};
+    b.onclick=select;b.ondblclick=()=>{select();$('#inventoryAdd').click();};
+  });
 }
-let invTimer;$('#inventorySearch')?.addEventListener('input',()=>{clearTimeout(invTimer);invTimer=setTimeout(searchInventoryItems,180)});
-$('#inventorySearch')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(!selectedInventoryItem)selectInventoryResult(0);else $('#inventoryAdd').click();}});
-$('#inventoryQty')?.addEventListener('keydown',e=>{if(e.key==='Enter')$('#inventoryAdd').click();});
-$('#inventoryAdd')?.addEventListener('click',async()=>{if(!selectedInventoryItem)return;await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+selectedInventoryItem.id,quantity:Math.max(0,+$('#inventoryQty').value||0)})});selectedInventoryItem=null;inventorySearchRows=[];showSelected('inventory',null);$('#inventorySearch').value='';$('#inventoryMatches').innerHTML='';await loadInventory();$('#inventorySearch').focus();});
+let invTimer;$('#inventorySearch')?.addEventListener('input',()=>{clearTimeout(invTimer);invTimer=setTimeout(searchInventoryItems,260)});
+$('#inventorySearch')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const first=$('#inventoryMatches .workshop-match');if(first){first.click();$('#inventoryQty').focus();}}});
+$('#inventoryQty')?.addEventListener('keydown',e=>{if(e.key==='Enter'&&!$('#inventoryAdd').disabled)$('#inventoryAdd').click();});
+$('#inventoryAdd')?.addEventListener('click',async()=>{if(!selectedInventoryItem)return;await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+selectedInventoryItem.id,quantity:Math.max(0,+$('#inventoryQty').value||0)})});selectedInventoryItem=null;showSelected('inventory',null);$('#inventorySearch').value='';$('#inventoryMatches').innerHTML='';await loadInventory();$('#inventorySearch').focus();});
 $('#workshopInventoryRefresh')?.addEventListener('click',loadInventory);
 function renderPlanLines(rows,type){if(!rows?.length)return '<div class="empty">Aucun élément.</div>';return rows.map(x=>`<div class="plan-line"><b>${esc(x.name)}</b><span>×${Number(x.quantity||x.units||0).toLocaleString('fr-FR')}</span><span>${type==='purchase'?(x.label+' · '+fmt(x.cost)):''}</span></div>`).join('');}
 function renderWorkshopPlan(data){
   if(!data){['workshopPurchases','workshopCraftSteps','workshopStockUsed','workshopSummary'].forEach(id=>$('#'+id).innerHTML='<div class="empty">Lance un calcul.</div>');return;}
   $('#workshopPurchases').innerHTML=renderPlanLines(data.purchases,'purchase');$('#workshopCraftSteps').innerHTML=renderPlanLines(data.crafts,'craft');$('#workshopStockUsed').innerHTML=renderPlanLines(data.stock_used,'stock');
-  const missing=renderPlanLines(data.missing,'missing');
-  const missingSales=renderPlanLines(data.missing_sales||[],'missing');
-  const profitClass=data.net_profit==null?'':(data.net_profit>=0?'good':'bad');
-  $('#workshopSummary').innerHTML=`<div class="metric-grid workshop-finance"><div><small>Investissement total</small><b>${fmt(data.total_cost)}</b></div><div><small>Vente brute estimée</small><b>${data.gross_sale==null?'—':fmt(data.gross_sale)}</b></div><div><small>Taxe HDV</small><b class="bad">${data.tax_amount==null?'—':'-'+fmt(data.tax_amount)}</b></div><div><small>Vente nette estimée</small><b>${data.net_sale==null?'—':fmt(data.net_sale)}</b></div><div><small>Bénéfice net</small><b class="${profitClass}">${data.net_profit==null?'—':fmt(data.net_profit)}</b></div><div><small>ROI net</small><b class="${profitClass}">${data.roi==null?'—':pct(data.roi)}</b></div><div><small>Objets fabriqués</small><b>${Number(data.output_units||0).toLocaleString('fr-FR')}</b></div><div><small>Bénéfice moyen / objet</small><b class="${profitClass}">${data.profit_per_unit==null?'—':fmt(data.profit_per_unit)}</b></div><div><small>État</small><b class="${data.complete?'good':'bad'}">${data.complete?'Plan complet':'Prix manquants'}</b></div><div><small>Achats / sous-crafts</small><b>${data.purchases.length} / ${data.crafts.length}</b></div></div>${data.missing.length?'<h3>Prix d’achat manquants</h3>'+missing:''}${(data.missing_sales||[]).length?'<h3>Prix de vente manquants</h3>'+missingSales:''}`;
+  const missing=renderPlanLines(data.missing,'missing');const missingSales=renderPlanLines(data.missing_sales,'missing');$('#workshopSummary').innerHTML=`<div class="metric-grid"><div><small>Investissement HDV</small><b>${fmt(data.total_cost)}</b></div><div><small>Vente brute estimée</small><b>${fmt(data.gross_sale)}</b></div><div><small>Taxe HDV</small><b class="bad">-${fmt(data.sale_tax)}</b></div><div><small>Vente nette</small><b>${fmt(data.net_sale)}</b></div><div><small>Bénéfice net</small><b class="${data.profit>0?'good':data.profit<0?'bad':''}">${fmt(data.profit)}</b></div><div><small>ROI net</small><b>${pct(data.roi)}</b></div><div><small>Bénéfice moyen / objet</small><b>${fmt(data.average_profit)}</b></div><div><small>Objets produits</small><b>${Number(data.total_output_quantity||0).toLocaleString('fr-FR')}</b></div><div><small>État</small><b class="${data.complete?'good':'bad'}">${data.complete?'Plan complet':'Prix manquants'}</b></div><div><small>Achats</small><b>${data.purchases.length}</b></div><div><small>Sous-crafts</small><b>${data.crafts.length}</b></div><div><small>Stock utilisé</small><b>${data.stock_used.length}</b></div></div>${data.missing.length?'<h3>Prix d’achat manquants</h3>'+missing:''}${data.missing_sales?.length?'<h3>Prix de vente manquants</h3>'+missingSales:''}`;
   $('#workshopState').textContent=data.complete?'✓ Plan calculé':'Plan calculé avec des prix manquants';
 }
 $('#workshopCalculate')?.addEventListener('click',async()=>{if(!workshopSelection.length){$('#workshopState').textContent='Ajoute au moins un craft.';return;}$('#workshopState').textContent='Calcul en cours…';const data=await api('/api/workshop-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selections:workshopSelection})});renderWorkshopPlan(data);});

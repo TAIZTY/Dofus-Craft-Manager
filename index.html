@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1020">
-  <title>Dofus Craft Manager — Salar V6.0</title>
+  <title>Dofus Craft Manager — Salar V5.5</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">DC</div>
-      <div><strong>Dofus Craft Manager</strong><small>Salar · V6.0</small></div>
+      <div><strong>Dofus Craft Manager</strong><small>Salar · V5.5</small></div>
     </div>
 
     <nav class="side-nav" aria-label="Navigation principale">
@@ -177,12 +177,12 @@
           <article class="action-card"><span class="action-icon">⇧</span><h3>Importer</h3><p>Réimporte une sauvegarde JSON de tes prix.</p><label class="file-button">Choisir un fichier<input id="importFile" type="file" accept="application/json"></label></article>
         </div>
         <section class="panel settings-panel"><div class="panel-head"><div><span class="kicker">CALCUL</span><h2>Taxe de vente</h2></div></div><div class="settings-row"><label class="check"><input id="taxEnabled" type="checkbox" checked><span>Prendre en compte la taxe HDV</span></label><label>Taux (%) <input id="taxRate" type="number" min="0" max="100" step="0.1" value="2.0"></label><button id="saveSettings">Enregistrer</button><strong id="settingsMessage"></strong></div><p>Les bénéfices et ROI affichés dans les Crafts et le Dashboard sont calculés après déduction de cette taxe.</p></section>
-        <section class="panel settings-panel"><div class="panel-head"><div><span class="kicker">ACTUALISATION</span><h2>Mise à jour automatique</h2></div></div><div class="settings-row"><label class="check"><input id="autoRefreshEnabled" type="checkbox" checked><span>Actualiser automatiquement les écrans</span></label><label>Intervalle (s) <input id="autoRefreshSeconds" type="number" min="10" max="300" step="5" value="30"></label><label class="check"><input id="autoSyncEnabled" type="checkbox" checked><span>Synchroniser les recettes si elles datent de plus de 24 h</span></label><button id="saveAutoSettings">Enregistrer</button><strong id="autoSettingsMessage"></strong></div><p>L’actualisation se met en pause pendant une saisie afin de ne jamais effacer ce que tu tapes.</p></section>
+        <section class="panel settings-panel"><div class="panel-head"><div><span class="kicker">ACTUALISATION</span><h2>Mise à jour automatique</h2></div></div><div class="settings-row"><label class="check"><input id="autoRefreshEnabled" type="checkbox" ><span>Actualiser automatiquement les écrans</span></label><label>Intervalle (s) <input id="autoRefreshSeconds" type="number" min="10" max="300" step="5" value="120"></label><label class="check"><input id="autoSyncEnabled" type="checkbox" checked><span>Synchroniser les recettes si elles datent de plus de 24 h</span></label><button id="saveAutoSettings">Enregistrer</button><strong id="autoSettingsMessage"></strong></div><p>L’actualisation se met en pause pendant une saisie afin de ne jamais effacer ce que tu tapes.</p></section>
         <div class="panel storage-note"><b>Emplacement local</b><code>data/dofus_salar.sqlite</code><p id="backupMessage"></p></div>
       </section>
     </main>
 
-    <footer><span>Dofus Craft Manager V5.3</span><span>Serveur Salar · fonctionnement local</span></footer>
+    <footer><span>Dofus Craft Manager V6.1 Performance</span><span>Serveur Salar · fonctionnement local</span></footer>
   </div>
 </div>
 
@@ -195,6 +195,6 @@
     <div class="modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette directe</h3><small>Modifie les prix x1, x10 et x100 de tous les ingrédients puis enregistre en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
   </div>
 </div>
-<script src="app.js?v=5.3"></script>
+<script src="app.js?v=6.1"></script>
 </body>
 </html>

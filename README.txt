@@ -1,4 +1,4 @@
-DOFUS CRAFT MANAGER — SALAR V6.0
+DOFUS CRAFT MANAGER — SALAR V5.5
 
 Base directe : V5.3.
 Nouveautés : Atelier léger avec sélection explicite des objets en stock ; Conseiller fusionné dans Opportunités.
@@ -25,9 +25,3 @@ NOUVEAUTÉS V5.3
 - Prix x1, x10 et x100 modifiables directement pour tous les ingrédients.
 - Bouton unique « Enregistrer tous les prix » et recalcul immédiat du coût, bénéfice et ROI.
 - Onglet Conseiller intelligent visible dans la barre latérale, avec recommandations selon ton budget.
-
-
-V6.0
-- Suppression complète du Scan HDV.
-- Opportunités et Conseiller réunis dans une seule page.
-- Atelier : ajout au stock au clavier, suppression rapide et résumé financier net après taxe.

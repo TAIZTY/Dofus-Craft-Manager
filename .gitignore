@@ -1,15 +1,13 @@
-# Cache Python
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
 
-# Base de données locale et sauvegardes
-# Décommente la ligne suivante pour ne jamais publier tes prix personnels :
-# data/dofus_salar.sqlite
+# Données personnelles locales
+data/dofus_salar.sqlite
 data/backups/
 
-# Logs
+# Logs et temporaires
 *.log
-
-# Fichiers temporaires Windows
 Thumbs.db
 Desktop.ini
+.DS_Store
