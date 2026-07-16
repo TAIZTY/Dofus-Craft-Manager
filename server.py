@@ -385,14 +385,34 @@ def build_workshop_plan(con, selections):
         plan=lot_purchase_plan(total,row['p1'] if row else None,row['p10'] if row else None,row['p100'] if row else None)
         if plan.get('cost') is None:add(missing,item_id,qty)
         else:purchases[item_id]=plan
-    for entry in selections or []:fulfill(int(entry.get('item_id') or 0),int(entry.get('quantity') or 0))
+    normalized_selections=[]
+    for entry in selections or []:
+        item_id=int(entry.get('item_id') or 0);qty=max(int(entry.get('quantity') or 0),0)
+        if item_id and qty:
+            normalized_selections.append((item_id,qty));fulfill(item_id,qty)
     def decorate(mapping):
         return sorted([{**item_rows.get(i,{'name':f'#{i}'}),'item_id':i,'quantity':q} for i,q in mapping.items()],key=lambda x:x.get('name',''))
     buy=[];total=0.0
     for i,plan in purchases.items():
         total+=float(plan.get('cost') or 0);buy.append({**item_rows.get(i,{'name':f'#{i}'}),'item_id':i,**plan})
     buy.sort(key=lambda x:x.get('name',''))
-    return {'purchases':buy,'crafts':decorate(crafts),'stock_used':decorate(stock_used),'missing':decorate(missing),'total_cost':total,'complete':not bool(missing)}
+    rate=tax_rate(con) if get_setting(con,'sale_tax_enabled','1') != '0' else 0.0
+    gross_sale=0.0;missing_sales={};output_units=0
+    for item_id,qty in normalized_selections:
+        output_units+=qty
+        unit=best_unit(price_rows.get(item_id))[0] if price_rows.get(item_id) else None
+        if unit is None:add(missing_sales,item_id,qty)
+        else:gross_sale+=float(unit)*qty
+    sales_complete=not bool(missing_sales)
+    net_sale=gross_sale*(1-rate) if sales_complete else None
+    tax_amount=gross_sale*rate if sales_complete else None
+    net_profit=(net_sale-total) if sales_complete and not missing else None
+    roi=(net_profit/total*100) if net_profit is not None and total else None
+    profit_per_unit=(net_profit/output_units) if net_profit is not None and output_units else None
+    return {'purchases':buy,'crafts':decorate(crafts),'stock_used':decorate(stock_used),'missing':decorate(missing),
+            'missing_sales':decorate(missing_sales),'total_cost':total,'gross_sale':gross_sale if sales_complete else None,
+            'tax_amount':tax_amount,'net_sale':net_sale,'net_profit':net_profit,'roi':roi,'profit_per_unit':profit_per_unit,
+            'output_units':output_units,'complete':not bool(missing) and sales_complete}
 
 class Handler(SimpleHTTPRequestHandler):
     def translate_path(self, path):
@@ -915,6 +935,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V5.2")
+    print("Dofus Craft Manager V6.0")
     print("Ouvre http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()

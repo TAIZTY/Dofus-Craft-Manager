@@ -20,7 +20,7 @@ function bindMoneyField(input, onChange) {
   formatMoneyField(input);
 }
 const esc = s => String(s ?? '').replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
-const pageNames = {dashboard:'Dashboard',crafts:'Crafts',prices:'Prix HDV',shopping:'Liste de courses',workshop:'Atelier',opportunities:'Opportunités & Conseiller',priorities:'Prix prioritaires',scanner:'Scan HDV',history:'Historique',backup:'Sauvegarde'};
+const pageNames = {dashboard:'Dashboard',crafts:'Crafts',prices:'Prix HDV',shopping:'Liste de courses',workshop:'Atelier',opportunities:'Opportunités & Conseiller',priorities:'Prix prioritaires',history:'Historique',backup:'Sauvegarde'};
 let craftIngredientFilter = 0;
 let craftIngredientName = '';
 let autoRefreshTimer = null;
@@ -438,7 +438,7 @@ renderShopping(); loadHistory(); runDiagnostics();
 $$('[data-open-ranking]').forEach(btn => btn.onclick = () => openCraftRanking(btn.dataset.openRanking || 'profit'));
 
 
-// ---- V5 : Opportunités, priorités et scan HDV assisté ----
+// ---- V5 : Opportunités et priorités ----
 let opportunityData=null, opportunityView='budget_best';
 function opportunityRows(items){
   const head='<div class="row header opportunity-row"><span>Objet</span><span>Coût optimal</span><span>Bénéfice net/u</span><span>ROI net</span><span>Quantité budget</span><span>Bénéfice budget</span><span>Confiance</span></div>';
@@ -469,18 +469,6 @@ async function loadPriorities(){
 }
 $('#priorityRefresh')?.addEventListener('click',loadPriorities);
 
-let scanMatches=[];
-function setScanImage(file){if(!file)return;const reader=new FileReader();reader.onload=()=>{$('#scanPreview').src=reader.result;$('#scanPreview').classList.remove('hidden');};reader.readAsDataURL(file);}
-$('#scanDrop')?.addEventListener('click',()=>$('#scanFile').click());
-$('#scanFile')?.addEventListener('change',e=>setScanImage(e.target.files[0]));
-$('#scanDrop')?.addEventListener('dragover',e=>{e.preventDefault();e.currentTarget.classList.add('drag');});
-$('#scanDrop')?.addEventListener('dragleave',e=>e.currentTarget.classList.remove('drag'));
-$('#scanDrop')?.addEventListener('drop',e=>{e.preventDefault();e.currentTarget.classList.remove('drag');setScanImage(e.dataTransfer.files[0]);});
-document.addEventListener('paste',e=>{if($('.page.active')?.id!=='scanner')return;const f=[...e.clipboardData.files].find(x=>x.type.startsWith('image/'));if(f)setScanImage(f);});
-let scanTimer;
-$('#scanItemSearch')?.addEventListener('input',()=>{clearTimeout(scanTimer);scanTimer=setTimeout(async()=>{const q=$('#scanItemSearch').value.trim();scanMatches=q?await api('/api/item-search?q='+encodeURIComponent(q)):[];$('#scanMatches').innerHTML=scanMatches.map(x=>`<button class="scan-match" data-id="${x.id}" data-name="${esc(x.name)}">${esc(x.name)}<small>${esc(x.subtype||x.category||'')}</small></button>`).join('');$$('.scan-match').forEach(b=>b.onclick=()=>{$('#scanItemId').value=b.dataset.id;$('#scanItemSearch').value=b.dataset.name;$('#scanMatches').innerHTML='';});},180);});
-['scanP1','scanP10','scanP100'].forEach(id=>bindMoneyField($('#'+id)));
-$('#scanSave')?.addEventListener('click',async()=>{const id=Number($('#scanItemId').value);if(!id){$('#scanMessage').textContent='Sélectionne un objet dans les résultats.';return;}const payload={item_id:id,p1:parseMoney($('#scanP1').value),p10:parseMoney($('#scanP10').value),p100:parseMoney($('#scanP100').value)};await api('/api/prices',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});$('#scanMessage').textContent='✓ Prix enregistrés et calculs actualisés';await Promise.allSettled([loadStatus(),loadDashboard(),loadCrafts(),loadPriorities(),loadOpportunities()]);});
 
 const oldRefreshVisiblePage=refreshVisiblePage;
 refreshVisiblePage=async function(showMessage=true){await oldRefreshVisiblePage(showMessage);const page=$('.page.active')?.id;if(page==='workshop')await loadWorkshopOnce();else if(page==='opportunities')await loadOpportunities();else if(page==='priorities')await loadPriorities();};
@@ -517,24 +505,41 @@ $('#workshopAddCraft')?.addEventListener('click',()=>{if(!selectedWorkshopCraft)
 $('#workshopClear')?.addEventListener('click',()=>{workshopSelection=[];saveWorkshopSelection();renderWorkshopPlan(null);});
 async function loadInventory(){
   const rows=await api('/api/inventory?limit=500');
-  $('#inventoryList').innerHTML=rows.length?rows.map(x=>`<div class="workshop-line inventory-line" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><input class="inventory-line-qty" type="number" min="0" value="${x.quantity}"><button class="secondary inventory-save">Mettre à jour</button></div>`).join(''):'<div class="empty">Inventaire vide.</div>';
-  $$('#inventoryList .inventory-line').forEach(row=>row.querySelector('.inventory-save').onclick=async()=>{await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+row.dataset.id,quantity:Math.max(0,+row.querySelector('.inventory-line-qty').value||0)})});await loadInventory();});
+  $('#inventoryList').innerHTML=rows.length?rows.map(x=>`<div class="workshop-line inventory-line" data-id="${x.id}"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><input class="inventory-line-qty" type="number" min="0" value="${x.quantity}"><button class="secondary inventory-save">Mettre à jour</button><button class="ghost inventory-remove" title="Retirer du stock">Supprimer</button></div>`).join(''):'<div class="empty">Inventaire vide.</div>';
+  $$('#inventoryList .inventory-line').forEach(row=>{
+    const save=async(quantity)=>{await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+row.dataset.id,quantity:Math.max(0,+quantity||0)})});await loadInventory();};
+    row.querySelector('.inventory-save').onclick=()=>save(row.querySelector('.inventory-line-qty').value);
+    row.querySelector('.inventory-remove').onclick=()=>save(0);
+    row.querySelector('.inventory-line-qty').addEventListener('keydown',e=>{if(e.key==='Enter')save(e.currentTarget.value);});
+  });
+}
+let inventorySearchRows=[];
+function selectInventoryResult(index=0){
+  const item=inventorySearchRows[index]; if(!item)return;
+  selectedInventoryItem=item;
+  const buttons=$$('#inventoryMatches .workshop-match');buttons.forEach(x=>x.classList.remove('selected'));buttons[index]?.classList.add('selected');
+  showSelected('inventory',item);$('#inventoryQty').focus();$('#inventoryQty').select();
 }
 async function searchInventoryItems(){
   const q=$('#inventorySearch').value.trim();selectedInventoryItem=null;showSelected('inventory',null);
-  if(!q){$('#inventoryMatches').innerHTML='';return;}
-  const rows=await api('/api/item-search?q='+encodeURIComponent(q)+'&limit=12');
-  $('#inventoryMatches').innerHTML=rows.map(x=>`<button class="workshop-match" data-id="${x.id}" data-name="${esc(x.name)}"><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></button>`).join('');
-  $$('#inventoryMatches .workshop-match').forEach((b,i)=>b.onclick=()=>{selectedInventoryItem=rows[i];$$('#inventoryMatches .workshop-match').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');showSelected('inventory',selectedInventoryItem);});
+  if(!q){inventorySearchRows=[];$('#inventoryMatches').innerHTML='';return;}
+  inventorySearchRows=await api('/api/item-search?q='+encodeURIComponent(q)+'&limit=12');
+  $('#inventoryMatches').innerHTML=inventorySearchRows.map(x=>`<button class="workshop-match" data-id="${x.id}" data-name="${esc(x.name)}"><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></button>`).join('');
+  $$('#inventoryMatches .workshop-match').forEach((b,i)=>{b.onclick=()=>selectInventoryResult(i);b.ondblclick=()=>{selectInventoryResult(i);$('#inventoryAdd').click();};});
 }
-let invTimer;$('#inventorySearch')?.addEventListener('input',()=>{clearTimeout(invTimer);invTimer=setTimeout(searchInventoryItems,220)});
-$('#inventoryAdd')?.addEventListener('click',async()=>{if(!selectedInventoryItem)return;await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+selectedInventoryItem.id,quantity:Math.max(0,+$('#inventoryQty').value||0)})});selectedInventoryItem=null;showSelected('inventory',null);$('#inventorySearch').value='';$('#inventoryMatches').innerHTML='';await loadInventory();});
+let invTimer;$('#inventorySearch')?.addEventListener('input',()=>{clearTimeout(invTimer);invTimer=setTimeout(searchInventoryItems,180)});
+$('#inventorySearch')?.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();if(!selectedInventoryItem)selectInventoryResult(0);else $('#inventoryAdd').click();}});
+$('#inventoryQty')?.addEventListener('keydown',e=>{if(e.key==='Enter')$('#inventoryAdd').click();});
+$('#inventoryAdd')?.addEventListener('click',async()=>{if(!selectedInventoryItem)return;await api('/api/inventory',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({item_id:+selectedInventoryItem.id,quantity:Math.max(0,+$('#inventoryQty').value||0)})});selectedInventoryItem=null;inventorySearchRows=[];showSelected('inventory',null);$('#inventorySearch').value='';$('#inventoryMatches').innerHTML='';await loadInventory();$('#inventorySearch').focus();});
 $('#workshopInventoryRefresh')?.addEventListener('click',loadInventory);
 function renderPlanLines(rows,type){if(!rows?.length)return '<div class="empty">Aucun élément.</div>';return rows.map(x=>`<div class="plan-line"><b>${esc(x.name)}</b><span>×${Number(x.quantity||x.units||0).toLocaleString('fr-FR')}</span><span>${type==='purchase'?(x.label+' · '+fmt(x.cost)):''}</span></div>`).join('');}
 function renderWorkshopPlan(data){
   if(!data){['workshopPurchases','workshopCraftSteps','workshopStockUsed','workshopSummary'].forEach(id=>$('#'+id).innerHTML='<div class="empty">Lance un calcul.</div>');return;}
   $('#workshopPurchases').innerHTML=renderPlanLines(data.purchases,'purchase');$('#workshopCraftSteps').innerHTML=renderPlanLines(data.crafts,'craft');$('#workshopStockUsed').innerHTML=renderPlanLines(data.stock_used,'stock');
-  const missing=renderPlanLines(data.missing,'missing');$('#workshopSummary').innerHTML=`<div class="metric-grid"><div><small>Coût total</small><b>${fmt(data.total_cost)}</b></div><div><small>État</small><b class="${data.complete?'good':'bad'}">${data.complete?'Plan complet':'Prix manquants'}</b></div><div><small>Achats</small><b>${data.purchases.length}</b></div><div><small>Sous-crafts</small><b>${data.crafts.length}</b></div></div>${data.missing.length?'<h3>Prix manquants</h3>'+missing:''}`;
+  const missing=renderPlanLines(data.missing,'missing');
+  const missingSales=renderPlanLines(data.missing_sales||[],'missing');
+  const profitClass=data.net_profit==null?'':(data.net_profit>=0?'good':'bad');
+  $('#workshopSummary').innerHTML=`<div class="metric-grid workshop-finance"><div><small>Investissement total</small><b>${fmt(data.total_cost)}</b></div><div><small>Vente brute estimée</small><b>${data.gross_sale==null?'—':fmt(data.gross_sale)}</b></div><div><small>Taxe HDV</small><b class="bad">${data.tax_amount==null?'—':'-'+fmt(data.tax_amount)}</b></div><div><small>Vente nette estimée</small><b>${data.net_sale==null?'—':fmt(data.net_sale)}</b></div><div><small>Bénéfice net</small><b class="${profitClass}">${data.net_profit==null?'—':fmt(data.net_profit)}</b></div><div><small>ROI net</small><b class="${profitClass}">${data.roi==null?'—':pct(data.roi)}</b></div><div><small>Objets fabriqués</small><b>${Number(data.output_units||0).toLocaleString('fr-FR')}</b></div><div><small>Bénéfice moyen / objet</small><b class="${profitClass}">${data.profit_per_unit==null?'—':fmt(data.profit_per_unit)}</b></div><div><small>État</small><b class="${data.complete?'good':'bad'}">${data.complete?'Plan complet':'Prix manquants'}</b></div><div><small>Achats / sous-crafts</small><b>${data.purchases.length} / ${data.crafts.length}</b></div></div>${data.missing.length?'<h3>Prix d’achat manquants</h3>'+missing:''}${(data.missing_sales||[]).length?'<h3>Prix de vente manquants</h3>'+missingSales:''}`;
   $('#workshopState').textContent=data.complete?'✓ Plan calculé':'Plan calculé avec des prix manquants';
 }
 $('#workshopCalculate')?.addEventListener('click',async()=>{if(!workshopSelection.length){$('#workshopState').textContent='Ajoute au moins un craft.';return;}$('#workshopState').textContent='Calcul en cours…';const data=await api('/api/workshop-plan',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({selections:workshopSelection})});renderWorkshopPlan(data);});

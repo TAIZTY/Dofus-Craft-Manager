@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1020">
-  <title>Dofus Craft Manager — Salar V5.5</title>
+  <title>Dofus Craft Manager — Salar V6.0</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">DC</div>
-      <div><strong>Dofus Craft Manager</strong><small>Salar · V5.5</small></div>
+      <div><strong>Dofus Craft Manager</strong><small>Salar · V6.0</small></div>
     </div>
 
     <nav class="side-nav" aria-label="Navigation principale">
@@ -23,7 +23,6 @@
       <button class="tab" data-page="workshop"><span>▦</span><b>Atelier</b></button>
       <button class="tab" data-page="opportunities"><span>✦</span><b>Opportunités & Conseiller</b></button>
       <button class="tab" data-page="priorities"><span>◎</span><b>Prix prioritaires</b></button>
-      <button class="tab" data-page="scanner"><span>▣</span><b>Scan HDV</b></button>
       <button class="tab" data-page="history"><span>↺</span><b>Historique</b></button>
       <button class="tab" data-page="backup"><span>⤓</span><b>Sauvegarde</b></button>
     </nav>
@@ -161,12 +160,6 @@
       <section id="priorities" class="page">
         <div class="section-intro"><div><span class="kicker">COUVERTURE</span><h2>Prix manquants prioritaires</h2><p>Relève d’abord les prix qui débloquent le plus de crafts.</p></div><button id="priorityRefresh" class="secondary">Recalculer</button></div>
         <div id="prioritySummary" class="info-strip"></div><div id="priorityList" class="data-table"></div>
-      </section>
-
-      <section id="scanner" class="page">
-        <div class="section-intro"><div><span class="kicker">SAISIE ASSISTÉE</span><h2>Scan HDV</h2><p>Colle ou importe une capture, puis confirme l’objet et les prix avant enregistrement.</p></div><div class="badge">Validation obligatoire</div></div>
-        <div class="scanner-grid"><section class="panel"><div id="scanDrop" class="scan-drop" tabindex="0"><b>Dépose une capture ici</b><span>ou clique pour choisir une image</span><input id="scanFile" type="file" accept="image/*" hidden></div><img id="scanPreview" class="scan-preview hidden" alt="Capture HDV"></section>
-        <section class="panel"><div class="search-wrap"><span>⌕</span><input id="scanItemSearch" placeholder="Nom de l’objet…" autocomplete="off"></div><div id="scanMatches" class="scan-matches"></div><input id="scanItemId" type="hidden"><div class="scan-prices"><label>Prix x1<input id="scanP1" class="money-field"></label><label>Prix x10<input id="scanP10" class="money-field"></label><label>Prix x100<input id="scanP100" class="money-field"></label></div><button id="scanSave">Valider et enregistrer</button><p id="scanMessage"></p><small class="muted">Cette version affiche la capture à côté de la saisie pour éviter les erreurs. La reconnaissance automatique du texte sera ajoutée après calibration sur tes captures réelles.</small></section></div>
       </section>
 
       <section id="history" class="page">

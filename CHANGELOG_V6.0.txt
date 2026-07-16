@@ -1,0 +1,8 @@
+Dofus Craft Manager — V6.0 réelle (base V5.5)
+
+- Suppression complète de l’onglet Scan HDV, de son JavaScript, de son CSS et de Tesseract.
+- Conservation de la page unique « Opportunités & Conseiller ».
+- Atelier : résumé financier avec investissement, vente brute, taxe, vente nette, bénéfice net, ROI et bénéfice moyen.
+- Atelier : saisie de stock améliorée au clavier (Entrée), double-clic pour ajouter, retour automatique au champ de recherche.
+- Inventaire : bouton Supprimer et validation avec Entrée.
+- Ajout d’un fichier .gitignore.
