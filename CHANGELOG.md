@@ -28,3 +28,9 @@
 - SQLite configuré avec cache mémoire, mmap et tables temporaires en mémoire.
 - Synchronisation API regroupée en opérations batch.
 - Comportement et interface V6.1 conservés.
+
+## V6.4 — Qualité de vie
+- Ajout d’un filtre par type de ressource dans « Prix prioritaires ».
+- Ajout de la modification des prix x1, x10 et x100 de l’objet crafté directement dans sa fiche.
+- Enregistrement groupé du prix de vente et des ingrédients.
+- Navigation au clavier avec Entrée entre les champs de prix.

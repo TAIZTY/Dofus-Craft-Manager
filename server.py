@@ -223,8 +223,14 @@ class Handler(SimpleHTTPRequestHandler):
             roi = profit / cost["best"] * 100 if profit is not None and cost["best"] else None
             output = {
                 "item": dict(output_row) if output_row else None,
-                "cost": cost,
+                "sale_prices": {
+                    "p1": price_row["p1"] if price_row else None,
+                    "p10": price_row["p10"] if price_row else None,
+                    "p100": price_row["p100"] if price_row else None,
+                    "updated_at": price_row["updated_at"] if price_row else None,
+                },
                 "sale": sale, "tax": tax, "net_sale": net_sale, "tax_rate": rate, "profit": profit, "roi": roi,
+                "cost": cost,
                 "ingredients": [{**dict(r), **calc(r["ingredient_id"]),
                                  "purchase_plan": lot_purchase_plan(r["quantity"], r["p1"], r["p10"], r["p100"])} for r in lines],
             }
@@ -280,6 +286,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         if url.path == "/api/priorities":
             limit = min(max(int(query.get("limit", ["50"])[0]), 1), 250)
+            resource_filter = (query.get("resource", [""])[0] or "").strip()
             con = db()
             calc, unit_prices, recipes = build_engine(con)
             item_rows = {r["id"]: dict(r) for r in con.execute("SELECT id,name,level,category,subtype,image FROM items")}
@@ -322,10 +329,13 @@ class Handler(SimpleHTTPRequestHandler):
                 if not row: continue
                 result.append({**row,"unlocks":exact.get(item_id,0),"potential":score,
                                "used_in":con.execute("SELECT COUNT(DISTINCT output_id) FROM recipes WHERE ingredient_id=?",(item_id,)).fetchone()[0]})
+            resources = sorted({(x.get("subtype") or x.get("category") or "Non classé") for x in result}, key=str.casefold)
+            if resource_filter:
+                result = [x for x in result if (x.get("subtype") or x.get("category") or "Non classé") == resource_filter]
             result.sort(key=lambda x:(-x["unlocks"],-x["potential"],x["name"].casefold()))
             priced=con.execute("SELECT COUNT(*) FROM prices WHERE COALESCE(p1,p10,p100) IS NOT NULL").fetchone()[0]
             con.close()
-            return self.send_json({"priced":priced,"items":result[:limit]})
+            return self.send_json({"priced":priced,"resources":resources,"selected_resource":resource_filter,"items":result[:limit]})
 
         if url.path == "/api/opportunities":
             try:

@@ -136,7 +136,17 @@ async function openRecipe(id, name) {
     const [recipe, tree] = await Promise.all([api('/api/recipe?id=' + id), api('/api/tree?id=' + id)]);
     $('#recipeTitle').textContent = name;
     const c = recipe.cost;
-    $('#recipeSummary').innerHTML = `<div class="summary-grid"><div><small>Prix de vente</small><b>${fmt(recipe.sale)}</b></div><div><small>Taxe (${Number(recipe.tax_rate*100).toFixed(1)} %)</small><b class="bad">-${fmt(recipe.tax)}</b></div><div><small>Vente nette</small><b>${fmt(recipe.net_sale)}</b></div><div><small>Coût retenu</small><b>${fmt(c.best)}</b></div><div><small>Bénéfice net</small><b class="${recipe.profit>0?'good':recipe.profit<0?'bad':''}">${fmt(recipe.profit)}</b></div><div><small>ROI net</small><b>${pct(recipe.roi)}</b></div><div><small>Choix</small><b>${esc(c.mode || 'incomplet')}</b></div></div>`;
+    const sp = recipe.sale_prices || {};
+    const retainedSaleLot = unitPrice(sp.p1, sp.p10, sp.p100);
+    $('#recipeSummary').innerHTML = `<div class="craft-sale-editor recipe-price-row" data-item-id="${recipe.item?.id || id}" data-item-name="${esc(name)}">
+      <div class="recipe-item-cell"><b>Prix de vente de ${esc(name)}</b><small>Modifiable directement dans la fiche craft</small></div>
+      <input class="rp1 money-field" type="text" inputmode="numeric" placeholder="Prix x1" value="${moneyInputValue(sp.p1)}" aria-label="Prix de vente x1 de ${esc(name)}">
+      <input class="rp10 money-field" type="text" inputmode="numeric" placeholder="Prix x10" value="${moneyInputValue(sp.p10)}" aria-label="Prix de vente x10 de ${esc(name)}">
+      <input class="rp100 money-field" type="text" inputmode="numeric" placeholder="Prix x100" value="${moneyInputValue(sp.p100)}" aria-label="Prix de vente x100 de ${esc(name)}">
+      <span class="recipe-best-lot"><b>${retainedSaleLot ? fmt(retainedSaleLot.value) : '—'}</b><small>${retainedSaleLot ? 'prix retenu via '+retainedSaleLot.label : 'prix de vente manquant'}</small></span>
+      <span class="recipe-line-cost"><b>${fmt(recipe.sale)}</b><small>prix unitaire retenu</small></span>
+      <button class="open-price-item secondary">Prix HDV →</button>
+    </div><div class="summary-grid"><div><small>Prix de vente retenu</small><b>${fmt(recipe.sale)}</b></div><div><small>Taxe (${Number(recipe.tax_rate*100).toFixed(1)} %)</small><b class="bad">-${fmt(recipe.tax)}</b></div><div><small>Vente nette</small><b>${fmt(recipe.net_sale)}</b></div><div><small>Coût retenu</small><b>${fmt(c.best)}</b></div><div><small>Bénéfice net</small><b class="${recipe.profit>0?'good':recipe.profit<0?'bad':''}">${fmt(recipe.profit)}</b></div><div><small>ROI net</small><b>${pct(recipe.roi)}</b></div><div><small>Choix</small><b>${esc(c.mode || 'incomplet')}</b></div></div>`;
     const missing = recipe.ingredients.filter(x => x.buy == null);
     const ingredientRows = recipe.ingredients.map(x => {
       const ingredientName = x.name || '#' + x.ingredient_id;
@@ -208,15 +218,24 @@ async function saveRecipePriceRow(row) {
   if (!result.ok) throw new Error('Sauvegarde non confirmée');
 }
 function bindRecipePriceTable() {
-  const rows = $$('#recipeBody .recipe-price-row[data-item-id]');
+  const rows = $$('#recipeSummary .recipe-price-row[data-item-id], #recipeBody .recipe-price-row[data-item-id]');
   rows.forEach(row => {
-    row.querySelectorAll('.money-field').forEach(input => bindMoneyField(input));
-    row.querySelector('.open-price-item').onclick = () => openItemInPrices(row.dataset.itemName);
+    row.querySelectorAll('.money-field').forEach((input, index, fields) => {
+      bindMoneyField(input);
+      input.addEventListener('keydown', e => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        const allFields = rows.flatMap(r => [...r.querySelectorAll('.money-field')]);
+        const currentIndex = allFields.indexOf(input);
+        (allFields[currentIndex + 1] || $('#saveAllRecipePrices'))?.focus();
+      });
+    });
+    row.querySelector('.open-price-item')?.addEventListener('click', () => openItemInPrices(row.dataset.itemName));
   });
   const saveAll = $('#saveAllRecipePrices');
   const state = $('#recipeSaveState');
   saveAll.onclick = async () => {
-    saveAll.disabled = true; state.textContent = `Sauvegarde de ${rows.length} ingrédient${rows.length>1?'s':''}…`; state.className='recipe-save-state';
+    saveAll.disabled = true; state.textContent = `Sauvegarde de ${rows.length} objet${rows.length>1?'s':''} (vente + ingrédients)…`; state.className='recipe-save-state';
     rows.forEach(row=>row.querySelectorAll('.money-field').forEach(formatMoneyField));
     try {
       const items = rows.map(row => ({
@@ -472,13 +491,22 @@ bindMoneyField($('#oppBudget'));
 $$('[data-opp-view]').forEach(b=>b.onclick=()=>{$$('[data-opp-view]').forEach(x=>x.classList.remove('active'));b.classList.add('active');opportunityView=b.dataset.oppView;renderOpportunityView();});
 
 async function loadPriorities(){
-  const data=await api('/api/priorities?limit=100');
-  $('#prioritySummary').innerHTML=`<span>● ${Number(data.priced||0).toLocaleString('fr-FR')} prix déjà renseignés</span><span>● Tri par crafts immédiatement débloqués</span>`;
+  const selected=$('#priorityResource')?.value || '';
+  const data=await api('/api/priorities?'+new URLSearchParams({limit:'100',resource:selected}));
+  const resourceSelect=$('#priorityResource');
+  if(resourceSelect){
+    const keep=data.selected_resource || selected;
+    resourceSelect.innerHTML='<option value="">Toutes les ressources</option>'+(data.resources||[]).map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    resourceSelect.value=keep;
+  }
+  const filterLabel=selected?`<span>● Filtre : ${esc(selected)}</span>`:'';
+  $('#prioritySummary').innerHTML=`<span>● ${Number(data.priced||0).toLocaleString('fr-FR')} prix déjà renseignés</span><span>● ${Number(data.items?.length||0).toLocaleString('fr-FR')} ressources affichées</span>${filterLabel}<span>● Tri par crafts immédiatement débloqués</span>`;
   const head='<div class="row header priority-row"><span>Objet à relever</span><span>Crafts débloqués immédiatement</span><span>Crafts potentiellement concernés</span><span>Utilisé directement dans</span><span>Action</span></div>';
-  $('#priorityList').innerHTML=head+(data.items?.length?data.items.map(x=>`<div class="row priority-row"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><span class="good">${Number(x.unlocks||0).toLocaleString('fr-FR')}</span><span>${Number(x.potential||0).toLocaleString('fr-FR')}</span><span>${Number(x.used_in||0).toLocaleString('fr-FR')}</span><span><button class="priority-price" data-name="${esc(x.name)}">Renseigner le prix</button></span></div>`).join(''):'<div class="empty">Aucun prix prioritaire : tous les crafts sont déjà calculables.</div>');
+  $('#priorityList').innerHTML=head+(data.items?.length?data.items.map(x=>`<div class="row priority-row"><span><b>${esc(x.name)}</b><small>${esc(x.subtype||x.category||'')}</small></span><span class="good">${Number(x.unlocks||0).toLocaleString('fr-FR')}</span><span>${Number(x.potential||0).toLocaleString('fr-FR')}</span><span>${Number(x.used_in||0).toLocaleString('fr-FR')}</span><span><button class="priority-price" data-name="${esc(x.name)}">Renseigner le prix</button></span></div>`).join(''):'<div class="empty">Aucun prix prioritaire pour ce filtre.</div>');
   $$('.priority-price').forEach(b=>b.onclick=()=>openItemInPrices(b.dataset.name));
 }
 $('#priorityRefresh')?.addEventListener('click',loadPriorities);
+$('#priorityResource')?.addEventListener('change',loadPriorities);
 
 
 const oldRefreshVisiblePage=refreshVisiblePage;
