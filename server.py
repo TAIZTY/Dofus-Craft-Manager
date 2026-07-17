@@ -241,37 +241,40 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json(tree)
 
         if url.path == "/api/dashboard":
-            con = db()
-            calc, prices, _ = build_engine(con)
-            enabled = get_setting(con, "sale_tax_enabled", "1") != "0"
-            rate = tax_rate(con) if enabled else 0.0
-            visibility_sql, visibility_params = visible_item_sql("i")
-            rows = con.execute(
-                f"SELECT i.* FROM items i WHERE EXISTS(SELECT 1 FROM recipes r WHERE r.output_id=i.id) AND {visibility_sql}",
-                visibility_params,
-            ).fetchall()
-            profitable = []
-            complete_count = 0
-            for row in rows:
-                cost = calc(row["id"])
-                sale = prices.get(row["id"])
-                if sale is not None and cost["best"] is not None:
-                    complete_count += 1
-                    tax = sale * rate
-                    net_sale = sale - tax
-                    profit = net_sale - cost["best"]
-                    roi = profit / cost["best"] * 100 if cost["best"] else None
-                    if profit > 0:
-                        profitable.append({**dict(row), **cost, "sale": sale, "tax": tax, "net_sale": net_sale, "tax_rate": rate, "profit": profit, "roi": roi})
-            profitable.sort(key=lambda x: (-x["profit"], -(x["roi"] or -10**30), x["name"].casefold()))
-            result = {
-                "complete": complete_count,
-                "profitable": len(profitable),
-                "top_profit": profitable[:20],
-                "top_roi": sorted(profitable, key=lambda x: (-(x["roi"] or -10**30), -x["profit"], x["name"].casefold()))[:20],
-            }
-            con.close()
-            return self.send_json(result)
+            def produce_dashboard():
+                con = db()
+                try:
+                    calc, prices, _ = build_engine(con)
+                    enabled = get_setting(con, "sale_tax_enabled", "1") != "0"
+                    rate = tax_rate(con) if enabled else 0.0
+                    visibility_sql, visibility_params = visible_item_sql("i")
+                    rows = con.execute(
+                        f"SELECT i.* FROM items i WHERE EXISTS(SELECT 1 FROM recipes r WHERE r.output_id=i.id) AND {visibility_sql}",
+                        visibility_params,
+                    ).fetchall()
+                    profitable = []
+                    complete_count = 0
+                    for row in rows:
+                        cost = calc(row["id"])
+                        sale = prices.get(row["id"])
+                        if sale is not None and cost["best"] is not None:
+                            complete_count += 1
+                            tax = sale * rate
+                            net_sale = sale - tax
+                            profit = net_sale - cost["best"]
+                            roi = profit / cost["best"] * 100 if cost["best"] else None
+                            if profit > 0:
+                                profitable.append({**dict(row), **cost, "sale": sale, "tax": tax, "net_sale": net_sale, "tax_rate": rate, "profit": profit, "roi": roi})
+                    profitable.sort(key=lambda x: (-x["profit"], -(x["roi"] or -10**30), x["name"].casefold()))
+                    return {
+                        "complete": complete_count,
+                        "profitable": len(profitable),
+                        "top_profit": profitable[:20],
+                        "top_roi": sorted(profitable, key=lambda x: (-(x["roi"] or -10**30), -x["profit"], x["name"].casefold()))[:20],
+                    }
+                finally:
+                    con.close()
+            return self.send_json(cached_response(("dashboard",), produce_dashboard))
 
 
 
@@ -325,46 +328,82 @@ class Handler(SimpleHTTPRequestHandler):
             return self.send_json({"priced":priced,"items":result[:limit]})
 
         if url.path == "/api/opportunities":
-            try: budget=max(0.0,float(query.get("budget",["5000000"])[0] or 0))
-            except ValueError: budget=5000000.0
-            con=db(); calc, prices, _=build_engine(con)
-            rate=tax_rate(con) if get_setting(con,"sale_tax_enabled","1") != "0" else 0.0
-            visibility_sql, visibility_params=visible_item_sql("i")
-            rows=con.execute(f"SELECT i.* FROM items i WHERE EXISTS(SELECT 1 FROM recipes r WHERE r.output_id=i.id) AND {visibility_sql}",visibility_params).fetchall()
-            opportunities=[]
-            workshop_context = make_workshop_context(con, use_inventory=False)
-            now=datetime.now()
-            for row in rows:
-                sale=prices.get(row["id"]); cost=calc(row["id"])
-                if sale is None or cost["best"] is None: continue
-                net=sale*(1-rate); profit=net-cost["best"]
-                if profit <= 0: continue
-                roi=profit/cost["best"]*100 if cost["best"] else None
-                price_row=con.execute("SELECT updated_at FROM prices WHERE item_id=?",(row["id"],)).fetchone()
-                age_days=999
-                if price_row and price_row[0]:
-                    try: age_days=max(0,(now-datetime.fromisoformat(price_row[0])).days)
-                    except ValueError: pass
-                confidence=max(20,100-min(age_days*4,60))
-                qty, actual_spend = strict_budget_plan(con, row["id"], budget, cost["best"], workshop_context)
-                budget_profit = qty * net - actual_spend if qty else 0.0
-                opportunities.append({**dict(row),**cost,"sale":sale,"net_sale":net,"profit":profit,"roi":roi,
-                                      "confidence":confidence,"budget_qty":qty,"budget_spend":actual_spend,
-                                      "budget_profit":budget_profit})
-            by_profit=sorted(opportunities,key=lambda x:(-x["profit"],-(x["roi"] or 0),x["name"].casefold()))
-            by_roi=sorted(opportunities,key=lambda x:(-(x["roi"] or 0),-x["profit"],x["name"].casefold()))
-            by_budget=sorted([x for x in opportunities if x["budget_qty"]>0],key=lambda x:(-x["budget_profit"],-x["profit"]))
-            low=[x for x in by_profit if x["best"]<=500000][:30]
-            high=[x for x in by_profit if x["best"]>=10000000][:30]
-            advice=[]
-            if by_budget:
-                x=by_budget[0]; advice.append(f"Avec {int(budget):,} K, le meilleur potentiel actuel est {x['name']} ×{x['budget_qty']} pour environ {int(x['budget_profit']):,} K nets.")
-            if by_roi:
-                x=by_roi[0]; advice.append(f"Le meilleur rendement est {x['name']} avec {x['roi']:.1f} % de ROI net.")
-            if by_profit:
-                x=by_profit[0]; advice.append(f"Le plus gros bénéfice unitaire est {x['name']} : environ {int(x['profit']):,} K nets.")
-            con.close()
-            return self.send_json({"budget":budget,"count":len(opportunities),"top_profit":by_profit[:30],"top_roi":by_roi[:30],"budget_best":by_budget[:30],"low_budget":low,"high_budget":high,"advice":advice})
+            try:
+                budget = max(0.0, float(query.get("budget", ["5000000"])[0] or 0))
+            except ValueError:
+                budget = 5000000.0
+
+            def produce_opportunities():
+                con = db()
+                try:
+                    calc, prices, _ = build_engine(con)
+                    rate = tax_rate(con) if get_setting(con, "sale_tax_enabled", "1") != "0" else 0.0
+                    visibility_sql, visibility_params = visible_item_sql("i")
+                    rows = con.execute(
+                        f"""SELECT i.*, p.updated_at AS price_updated_at
+                            FROM items i
+                            LEFT JOIN prices p ON p.item_id=i.id
+                            WHERE EXISTS(SELECT 1 FROM recipes r WHERE r.output_id=i.id)
+                              AND {visibility_sql}""",
+                        visibility_params,
+                    ).fetchall()
+                    now = datetime.now()
+                    candidates = []
+                    for row in rows:
+                        sale = prices.get(row["id"])
+                        cost = calc(row["id"])
+                        if sale is None or cost["best"] is None or cost["best"] <= 0:
+                            continue
+                        net = sale * (1 - rate)
+                        profit = net - cost["best"]
+                        if profit <= 0:
+                            continue
+                        roi = profit / cost["best"] * 100
+                        age_days = 999
+                        if row["price_updated_at"]:
+                            try:
+                                age_days = max(0, (now - datetime.fromisoformat(row["price_updated_at"])).days)
+                            except ValueError:
+                                pass
+                        confidence = max(20, 100 - min(age_days * 4, 60))
+                        candidates.append({**dict(row), **cost, "sale": sale, "net_sale": net,
+                                           "profit": profit, "roi": roi, "confidence": confidence})
+
+                    # Le calcul strict des lots est le plus coûteux. On le limite aux meilleurs
+                    # candidats théoriquement accessibles, puis on vérifie réellement le budget.
+                    candidates.sort(key=lambda x: (-x["profit"], -x["roi"], x["name"].casefold()))
+                    budget_pool = [x for x in candidates if x["best"] <= budget][:200]
+                    workshop_context = make_workshop_context(con, use_inventory=False)
+                    budget_rows = []
+                    for item in budget_pool:
+                        qty, actual_spend = strict_budget_plan(con, item["id"], budget, item["best"], workshop_context)
+                        enriched = {**item, "budget_qty": qty, "budget_spend": actual_spend,
+                                    "budget_profit": qty * item["net_sale"] - actual_spend if qty else 0.0}
+                        if qty > 0 and actual_spend <= budget + 1e-9:
+                            budget_rows.append(enriched)
+
+                    by_profit = candidates
+                    by_roi = sorted(candidates, key=lambda x: (-x["roi"], -x["profit"], x["name"].casefold()))
+                    by_budget = sorted(budget_rows, key=lambda x: (-x["budget_profit"], -x["profit"], x["name"].casefold()))
+                    low = [x for x in by_profit if x["best"] <= 500000][:30]
+                    high = [x for x in by_profit if x["best"] >= 10000000][:30]
+                    advice = []
+                    if by_budget:
+                        x = by_budget[0]
+                        advice.append(f"Avec {int(budget):,} K, le meilleur potentiel actuel est {x['name']} ×{x['budget_qty']} pour environ {int(x['budget_profit']):,} K nets.")
+                    if by_roi:
+                        x = by_roi[0]
+                        advice.append(f"Le meilleur rendement est {x['name']} avec {x['roi']:.1f} % de ROI net.")
+                    if by_profit:
+                        x = by_profit[0]
+                        advice.append(f"Le plus gros bénéfice unitaire est {x['name']} : environ {int(x['profit']):,} K nets.")
+                    return {"budget": budget, "count": len(candidates), "top_profit": by_profit[:30],
+                            "top_roi": by_roi[:30], "budget_best": by_budget[:30],
+                            "low_budget": low, "high_budget": high, "advice": advice}
+                finally:
+                    con.close()
+
+            return self.send_json(cached_response(("opportunities", round(budget, 2)), produce_opportunities))
 
         if url.path == "/api/item-search":
             term=query.get("q",[""])[0].strip(); limit=min(max(int(query.get("limit",["20"])[0]),1),50)
@@ -467,6 +506,38 @@ class Handler(SimpleHTTPRequestHandler):
     def do_POST(self):
         url = urllib.parse.urlparse(self.path)
 
+        if url.path == "/api/prices-batch":
+            data = self.read_json()
+            rows = data.get("items", []) if isinstance(data, dict) else []
+            normalized = []
+            for item in rows:
+                try:
+                    item_id = int(item.get("item_id"))
+                except (TypeError, ValueError):
+                    continue
+                normalized.append((item_id, item.get("p1"), item.get("p10"), item.get("p100")))
+            if not normalized:
+                return self.send_json({"ok": False, "error": "Aucun prix valide"}, 400)
+            con = db()
+            try:
+                con.executemany(
+                    """INSERT INTO prices(item_id,p1,p10,p100,updated_at)
+                       VALUES(?,?,?,?,datetime('now','localtime'))
+                       ON CONFLICT(item_id) DO UPDATE SET
+                         p1=excluded.p1,p10=excluded.p10,p100=excluded.p100,updated_at=excluded.updated_at""",
+                    normalized,
+                )
+                con.executemany(
+                    "INSERT INTO price_history(item_id,p1,p10,p100) VALUES(?,?,?,?)",
+                    normalized,
+                )
+                con.commit()
+            finally:
+                con.close()
+            invalidate_engine()
+            invalidate_response_cache()
+            return self.send_json({"ok": True, "count": len(normalized)})
+
         if url.path == "/api/prices":
             data = self.read_json()
             con = db()
@@ -566,6 +637,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V6.2 Architecture & Performance")
+    print("Dofus Craft Manager V6.3 Stable & Fluide")
     print("Ouvre http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()

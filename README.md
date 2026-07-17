@@ -23,7 +23,7 @@ Application locale de calcul de rentabilité des crafts pour Dofus 3.
 `data/dofus_salar.sqlite` contient les prix et l'inventaire personnels. Le fichier est ignoré par Git grâce à `.gitignore`.
 
 
-### Architecture V6.2
+### Architecture V6.3
 Le backend est désormais réparti dans `dcm/` :
 - `database.py` : SQLite et migrations
 - `engine.py` : calcul récursif acheter/fabriquer

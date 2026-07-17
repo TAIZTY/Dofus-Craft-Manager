@@ -1,3 +1,13 @@
+# Changelog
+
+## V6.3 — Stable & Fluide
+- Sauvegarde groupée des prix depuis une fiche craft (une seule requête).
+- Cache réel du Dashboard et des Opportunités.
+- Suppression du N+1 SQL dans Opportunités.
+- Vérification stricte du budget limitée aux meilleurs candidats accessibles.
+- Index SQLite complémentaires.
+- Tests fonctionnels renforcés.
+
 # Dofus Craft Manager — V6.1 Performance
 
 ## Modifications

@@ -56,6 +56,9 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_recipes_output ON recipes(output_id);
         CREATE INDEX IF NOT EXISTS idx_recipes_ingredient ON recipes(ingredient_id);
         CREATE INDEX IF NOT EXISTS idx_price_history_item ON price_history(item_id,recorded_at);
+        CREATE INDEX IF NOT EXISTS idx_prices_updated_at ON prices(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_inventory_updated_at ON inventory(updated_at);
+        CREATE INDEX IF NOT EXISTS idx_recipes_output_ingredient ON recipes(output_id,ingredient_id);
     """)
     columns = {r[1] for r in cur.execute("PRAGMA table_info(items)")}
     if "name_search" not in columns:

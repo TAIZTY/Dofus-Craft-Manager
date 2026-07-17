@@ -219,8 +219,15 @@ function bindRecipePriceTable() {
     saveAll.disabled = true; state.textContent = `Sauvegarde de ${rows.length} ingrédient${rows.length>1?'s':''}…`; state.className='recipe-save-state';
     rows.forEach(row=>row.querySelectorAll('.money-field').forEach(formatMoneyField));
     try {
-      for (const row of rows) await saveRecipePriceRow(row);
-      state.textContent = '✓ Tous les prix sont enregistrés. Craft recalculé.'; state.className='recipe-save-state good';
+      const items = rows.map(row => ({
+        item_id:+row.dataset.itemId,
+        p1:parseMoney(row.querySelector('.rp1').value),
+        p10:parseMoney(row.querySelector('.rp10').value),
+        p100:parseMoney(row.querySelector('.rp100').value)
+      }));
+      const result = await api('/api/prices-batch',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({items})});
+      if (!result.ok) throw new Error('Sauvegarde groupée non confirmée');
+      state.textContent = `✓ ${result.count} prix enregistrés. Craft recalculé.`; state.className='recipe-save-state good';
       await loadStatus();
       analyticsDirty=true;
       const recipe = currentRecipe; if (recipe) await openRecipe(recipe.id, recipe.name);
