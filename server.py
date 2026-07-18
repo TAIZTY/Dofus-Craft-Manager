@@ -647,6 +647,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V6.3 Stable & Fluide")
+    print("Dofus Craft Manager V6.4.1 Correctif prix de vente")
     print("Ouvre http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()

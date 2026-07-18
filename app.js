@@ -138,15 +138,16 @@ async function openRecipe(id, name) {
     const c = recipe.cost;
     const sp = recipe.sale_prices || {};
     const retainedSaleLot = unitPrice(sp.p1, sp.p10, sp.p100);
-    $('#recipeSummary').innerHTML = `<div class="craft-sale-editor recipe-price-row" data-item-id="${recipe.item?.id || id}" data-item-name="${esc(name)}">
-      <div class="recipe-item-cell"><b>Prix de vente de ${esc(name)}</b><small>Modifiable directement dans la fiche craft</small></div>
-      <input class="rp1 money-field" type="text" inputmode="numeric" placeholder="Prix x1" value="${moneyInputValue(sp.p1)}" aria-label="Prix de vente x1 de ${esc(name)}">
-      <input class="rp10 money-field" type="text" inputmode="numeric" placeholder="Prix x10" value="${moneyInputValue(sp.p10)}" aria-label="Prix de vente x10 de ${esc(name)}">
-      <input class="rp100 money-field" type="text" inputmode="numeric" placeholder="Prix x100" value="${moneyInputValue(sp.p100)}" aria-label="Prix de vente x100 de ${esc(name)}">
-      <span class="recipe-best-lot"><b>${retainedSaleLot ? fmt(retainedSaleLot.value) : '—'}</b><small>${retainedSaleLot ? 'prix retenu via '+retainedSaleLot.label : 'prix de vente manquant'}</small></span>
-      <span class="recipe-line-cost"><b>${fmt(recipe.sale)}</b><small>prix unitaire retenu</small></span>
-      <button class="open-price-item secondary">Prix HDV →</button>
-    </div><div class="summary-grid"><div><small>Prix de vente retenu</small><b>${fmt(recipe.sale)}</b></div><div><small>Taxe (${Number(recipe.tax_rate*100).toFixed(1)} %)</small><b class="bad">-${fmt(recipe.tax)}</b></div><div><small>Vente nette</small><b>${fmt(recipe.net_sale)}</b></div><div><small>Coût retenu</small><b>${fmt(c.best)}</b></div><div><small>Bénéfice net</small><b class="${recipe.profit>0?'good':recipe.profit<0?'bad':''}">${fmt(recipe.profit)}</b></div><div><small>ROI net</small><b>${pct(recipe.roi)}</b></div><div><small>Choix</small><b>${esc(c.mode || 'incomplet')}</b></div></div>`;
+    $('#recipeSummary').innerHTML = `<section class="craft-sale-editor" data-item-id="${recipe.item?.id || id}" data-item-name="${esc(name)}">
+      <div class="craft-sale-heading"><div><span class="kicker">PRIX DE L’OBJET CRAFTÉ</span><h3>${esc(name)}</h3><small>Modifie d’abord le prix de vente, indépendamment des composants.</small></div><button class="open-price-item secondary">Ouvrir dans Prix HDV →</button></div>
+      <div class="craft-sale-fields">
+        <label><span>Prix x1</span><input class="rp1 money-field" type="text" inputmode="numeric" placeholder="Prix x1" value="${moneyInputValue(sp.p1)}" aria-label="Prix de vente x1 de ${esc(name)}"></label>
+        <label><span>Prix x10</span><input class="rp10 money-field" type="text" inputmode="numeric" placeholder="Prix x10" value="${moneyInputValue(sp.p10)}" aria-label="Prix de vente x10 de ${esc(name)}"></label>
+        <label><span>Prix x100</span><input class="rp100 money-field" type="text" inputmode="numeric" placeholder="Prix x100" value="${moneyInputValue(sp.p100)}" aria-label="Prix de vente x100 de ${esc(name)}"></label>
+        <div class="craft-sale-retained"><span>Meilleur prix unitaire</span><b>${retainedSaleLot ? fmt(retainedSaleLot.value) : '—'}</b><small>${retainedSaleLot ? 'retenu via '+retainedSaleLot.label : 'prix manquant'}</small></div>
+      </div>
+      <div class="craft-sale-actions"><button id="saveCraftSalePrice">Enregistrer le prix de vente</button><span id="craftSaleSaveState" class="recipe-save-state"></span></div>
+    </section><div class="summary-grid"><div><small>Prix de vente retenu</small><b>${fmt(recipe.sale)}</b></div><div><small>Taxe (${Number(recipe.tax_rate*100).toFixed(1)} %)</small><b class="bad">-${fmt(recipe.tax)}</b></div><div><small>Vente nette</small><b>${fmt(recipe.net_sale)}</b></div><div><small>Coût retenu</small><b>${fmt(c.best)}</b></div><div><small>Bénéfice net</small><b class="${recipe.profit>0?'good':recipe.profit<0?'bad':''}">${fmt(recipe.profit)}</b></div><div><small>ROI net</small><b>${pct(recipe.roi)}</b></div><div><small>Choix</small><b>${esc(c.mode || 'incomplet')}</b></div></div>`;
     const missing = recipe.ingredients.filter(x => x.buy == null);
     const ingredientRows = recipe.ingredients.map(x => {
       const ingredientName = x.name || '#' + x.ingredient_id;
@@ -232,6 +233,22 @@ function bindRecipePriceTable() {
     });
     row.querySelector('.open-price-item')?.addEventListener('click', () => openItemInPrices(row.dataset.itemName));
   });
+  const saleRow = $('#recipeSummary .craft-sale-editor[data-item-id]');
+  const saveSale = $('#saveCraftSalePrice');
+  const saleState = $('#craftSaleSaveState');
+  if (saleRow && saveSale) {
+    saveSale.onclick = async () => {
+      saveSale.disabled = true; saleState.textContent = 'Sauvegarde du prix de vente…'; saleState.className='recipe-save-state';
+      saleRow.querySelectorAll('.money-field').forEach(formatMoneyField);
+      try {
+        await saveRecipePriceRow(saleRow);
+        saleState.textContent = '✓ Prix de vente enregistré. Recalcul du craft…'; saleState.className='recipe-save-state good';
+        await loadStatus(); analyticsDirty=true;
+        const recipe = currentRecipe; if (recipe) await openRecipe(recipe.id, recipe.name);
+      } catch(e) { saleState.textContent='Erreur : '+e.message; saleState.className='recipe-save-state bad'; }
+      finally { saveSale.disabled=false; }
+    };
+  }
   const saveAll = $('#saveAllRecipePrices');
   const state = $('#recipeSaveState');
   saveAll.onclick = async () => {
