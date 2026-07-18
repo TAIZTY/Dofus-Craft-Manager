@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1020">
-  <title>Dofus Craft Manager — Salar V5.5</title>
+  <title>Dofus Craft Manager — Salar V6.5</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,15 +12,14 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">DC</div>
-      <div><strong>Dofus Craft Manager</strong><small>Salar · V5.5</small></div>
+      <div><strong>Dofus Craft Manager</strong><small>Salar · V6.5</small></div>
     </div>
 
     <nav class="side-nav" aria-label="Navigation principale">
       <button class="tab active" data-page="dashboard"><span>⌂</span><b>Dashboard</b></button>
       <button class="tab" data-page="crafts"><span>⚒</span><b>Crafts</b></button>
       <button class="tab" data-page="prices"><span>₭</span><b>Prix HDV</b></button>
-      <button class="tab" data-page="shopping"><span>☷</span><b>Liste de courses</b></button>
-      <button class="tab" data-page="workshop"><span>▦</span><b>Atelier</b></button>
+      <button class="tab" data-page="workshop"><span>▦</span><b>Atelier & Courses</b></button>
       <button class="tab" data-page="opportunities"><span>✦</span><b>Opportunités & Conseiller</b></button>
       <button class="tab" data-page="priorities"><span>◎</span><b>Prix prioritaires</b></button>
       <button class="tab" data-page="history"><span>↺</span><b>Historique</b></button>
@@ -114,16 +113,8 @@
         <div id="priceList" class="price-table"></div>
       </section>
 
-
-      <section id="shopping" class="page">
-        <div class="section-intro"><div><span class="kicker">PLANIFICATION</span><h2>Liste de courses</h2><p>Ajoute un craft depuis sa fiche. L'application additionne les ressources terminales selon le chemin acheter/fabriquer optimal.</p></div><button id="clearShopping" class="secondary">Vider la liste</button></div>
-        <div class="filter-card"><div class="search-wrap"><span>⌕</span><input id="shoppingSearch" placeholder="Rechercher un craft à ajouter…" autocomplete="off"></div><input id="shoppingQty" type="number" min="1" value="1" title="Quantité"><button id="shoppingAdd">Ajouter</button></div>
-        <div id="shoppingMatches" class="compact-table"></div>
-        <div class="dashboard-grid"><section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">SÉLECTION</span><h2>Crafts demandés</h2></div></div><div id="shoppingSelected"></div></section><section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">ACHATS</span><h2>Ressources à acheter</h2></div><button id="copyShopping" class="link">Copier</button></div><div id="shoppingResult"></div></section></div>
-      </section>
-
       <section id="workshop" class="page">
-        <div class="section-intro"><div><span class="kicker">PRODUCTION</span><h2>Atelier</h2><p>Prépare plusieurs crafts et déduis directement les ressources déjà en stock.</p></div><div class="badge">Chargement à la demande</div></div>
+        <div class="section-intro"><div><span class="kicker">PRODUCTION & ACHATS</span><h2>Atelier & liste de courses</h2><p>Ajoute les objets à fabriquer : la liste de courses est calculée automatiquement après déduction de ton stock.</p></div><div class="badge">Chargement à la demande</div></div>
         <div class="workshop-grid">
           <section class="panel">
             <div class="panel-head"><div><span class="kicker">OBJECTIFS</span><h2>Objets à fabriquer</h2></div><button id="workshopClear" class="secondary">Tout vider</button></div>
@@ -142,7 +133,7 @@
         </div>
         <div class="workshop-actions"><button id="workshopCalculate">Calculer le plan</button><span id="workshopState"></span></div>
         <div class="dashboard-grid workshop-results">
-          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">ACHATS HDV</span><h2>Liste d’achats optimisée</h2></div><button id="workshopCopy" class="link">Copier</button></div><div id="workshopPurchases"></div></section>
+          <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">COURSES — STOCK DÉDUIT</span><h2>Ressources à acheter</h2></div><button id="workshopCopy" class="link">Copier</button></div><div id="workshopPurchases"></div></section>
           <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">SOUS-CRAFTS</span><h2>Ordre de fabrication</h2></div></div><div id="workshopCraftSteps"></div></section>
           <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">STOCK</span><h2>Inventaire utilisé</h2></div></div><div id="workshopStockUsed"></div></section>
           <section class="panel wide-panel"><div class="panel-head"><div><span class="kicker">BILAN</span><h2>Résumé</h2></div></div><div id="workshopSummary"></div></section>
@@ -183,7 +174,7 @@
       </section>
     </main>
 
-    <footer><span>Dofus Craft Manager V6.4.1 Correctif prix de vente</span><span>Serveur Salar · fonctionnement local</span></footer>
+    <footer><span>Dofus Craft Manager V6.5 Atelier & liste de courses</span><span>Serveur Salar · fonctionnement local</span></footer>
   </div>
 </div>
 
@@ -192,10 +183,10 @@
     <button id="closeModal" class="close" aria-label="Fermer">×</button>
     <span class="kicker">DÉTAIL DU CRAFT</span>
     <h2 id="recipeTitle"></h2>
-    <div id="recipeSummary"></div><div class="modal-actions"><input id="modalQty" type="number" min="1" value="1"><button id="addModalShopping">Ajouter à la liste de courses</button></div>
-    <div class="modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette directe</h3><small>Modifie les prix x1, x10 et x100 de tous les ingrédients puis enregistre en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
+    <div id="recipeSummary"></div><div class="modal-actions"><input id="modalQty" type="number" min="1" value="1"><button id="addModalShopping">Ajouter à l’atelier</button></div>
+    <div class="modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette complète</h3><small>Modifie le prix de chaque composant et de chaque sous-composant craftable, puis enregistre tout en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
   </div>
 </div>
-<script src="app.js?v=6.4.1"></script>
+<script src="app.js?v=6.5"></script>
 </body>
 </html>

@@ -57,3 +57,12 @@
 .craft-sale-editor{margin:12px 0 16px;padding:16px;border:1px solid var(--border);border-radius:14px;background:var(--panel-2)}
 .craft-sale-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px}.craft-sale-heading h3{margin:3px 0}.craft-sale-heading small{color:var(--muted)}
 .craft-sale-fields{display:grid;grid-template-columns:repeat(3,minmax(130px,1fr)) minmax(160px,1fr);gap:10px;align-items:end}.craft-sale-fields label span,.craft-sale-retained>span{display:block;color:var(--muted);font-size:.75rem;margin-bottom:5px}.craft-sale-fields input{width:100%;background:#091120;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:11px;font-variant-numeric:tabular-nums}.craft-sale-fields input:focus{outline:none;border-color:var(--accent2);box-shadow:0 0 0 2px rgba(88,220,190,.12)}.craft-sale-retained{padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:#0b1425}.craft-sale-retained b,.craft-sale-retained small{display:block}.craft-sale-retained small{color:var(--muted);margin-top:3px}.craft-sale-actions{display:flex;align-items:center;gap:12px;margin-top:12px;flex-wrap:wrap}@media(max-width:850px){.craft-sale-heading{display:block}.craft-sale-heading button{margin-top:10px}.craft-sale-fields{grid-template-columns:1fr}.craft-sale-editor{overflow:visible}}
+
+/* V6.6 - éditeur récursif des sous-recettes */
+.recursive-price-help{display:flex;flex-direction:column;gap:4px;padding:12px 14px;margin-bottom:10px;border:1px solid var(--line);border-radius:12px;background:#101c31}.recursive-price-help small{color:var(--muted)}
+.recipe-tree-price-row .recipe-item-cell{padding-left:calc(var(--recipe-depth,0) * 22px)}
+.recipe-tree-price-row[data-depth="1"]{background:rgba(88,220,190,.035)}
+.recipe-tree-price-row[data-depth="2"]{background:rgba(88,220,190,.065)}
+.recipe-tree-price-row[data-depth="3"],.recipe-tree-price-row[data-depth="4"],.recipe-tree-price-row[data-depth="5"]{background:rgba(88,220,190,.09)}
+.recipe-tree-price-row .recipe-item-cell b:before{content:'↳ ';color:var(--accent2);opacity:calc(.25 + min(var(--recipe-depth,0),3) * .2)}
+.recipe-tree-price-row[data-depth="0"] .recipe-item-cell b:before{content:''}

@@ -221,6 +221,44 @@ class Handler(SimpleHTTPRequestHandler):
             net_sale = sale - tax if sale is not None else None
             profit = net_sale - cost["best"] if net_sale is not None and cost["best"] is not None else None
             roi = profit / cost["best"] * 100 if profit is not None and cost["best"] else None
+            def editable_recipe_tree(output_id, multiplier=1, depth=0, path=None, max_depth=8):
+                path = set(path or set())
+                if depth >= max_depth or output_id in path:
+                    return []
+                next_path = set(path); next_path.add(output_id)
+                child_rows = con.execute(
+                    """
+                    SELECT r.ingredient_id,r.quantity,i.name,i.level,i.category,i.subtype,i.image,
+                           p.p1,p.p10,p.p100,p.updated_at,
+                           EXISTS(SELECT 1 FROM recipes cr WHERE cr.output_id=r.ingredient_id) AS is_craftable
+                    FROM recipes r
+                    LEFT JOIN items i ON i.id=r.ingredient_id
+                    LEFT JOIN prices p ON p.item_id=r.ingredient_id
+                    WHERE r.output_id=? ORDER BY i.name
+                    """,
+                    (output_id,),
+                ).fetchall()
+                nodes = []
+                for child in child_rows:
+                    row = dict(child)
+                    unit_qty = int(row.get("quantity") or 0)
+                    total_qty = unit_qty * multiplier
+                    node = {
+                        **row,
+                        **calc(row["ingredient_id"]),
+                        "unit_quantity": unit_qty,
+                        "total_quantity": total_qty,
+                        "depth": depth,
+                        "purchase_plan": lot_purchase_plan(total_qty, row.get("p1"), row.get("p10"), row.get("p100")),
+                        "children": [],
+                    }
+                    if row.get("is_craftable"):
+                        node["children"] = editable_recipe_tree(
+                            row["ingredient_id"], total_qty, depth + 1, next_path, max_depth
+                        )
+                    nodes.append(node)
+                return nodes
+
             output = {
                 "item": dict(output_row) if output_row else None,
                 "sale_prices": {
@@ -233,6 +271,7 @@ class Handler(SimpleHTTPRequestHandler):
                 "cost": cost,
                 "ingredients": [{**dict(r), **calc(r["ingredient_id"]),
                                  "purchase_plan": lot_purchase_plan(r["quantity"], r["p1"], r["p10"], r["p100"])} for r in lines],
+                "editable_tree": editable_recipe_tree(item_id),
             }
             con.close()
             return self.send_json(output)
@@ -647,6 +686,6 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V6.4.1 Correctif prix de vente")
+    print("Dofus Craft Manager V6.6 Prix récursifs")
     print("Ouvre http://127.0.0.1:8765")
     ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()

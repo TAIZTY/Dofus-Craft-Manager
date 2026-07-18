@@ -1,3 +1,19 @@
+# V6.6 — Prix récursifs dans les crafts
+
+- Modification du prix de vente de l’objet final.
+- Modification des prix de tous les composants directs.
+- Modification des prix des composants des composants, jusqu’à 8 niveaux.
+- Affichage indenté de la hiérarchie des sous-recettes.
+- Sauvegarde groupée sans doublons.
+
+# V6.6 — Atelier & liste de courses
+
+- Fusion de la Liste de courses et de l’Atelier.
+- Tout objet ajouté depuis une fiche craft rejoint automatiquement « Objets à fabriquer ».
+- La liste de courses est recalculée après déduction du stock.
+- Recalcul automatique après ajout, retrait, changement de quantité ou modification du stock.
+- Migration automatique de l’ancienne liste locale vers l’Atelier.
+
 # Changelog
 
 ## V6.3 — Stable & Fluide
