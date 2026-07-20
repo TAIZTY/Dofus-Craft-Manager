@@ -60,6 +60,11 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_inventory_updated_at ON inventory(updated_at);
         CREATE INDEX IF NOT EXISTS idx_recipes_output_ingredient ON recipes(output_id,ingredient_id);
     """)
+    history_columns = {r[1] for r in cur.execute("PRAGMA table_info(price_history)")}
+    if "actor" not in history_columns:
+        cur.execute("ALTER TABLE price_history ADD COLUMN actor TEXT")
+    cur.execute("CREATE INDEX IF NOT EXISTS idx_price_history_actor_time ON price_history(actor,recorded_at)")
+
     columns = {r[1] for r in cur.execute("PRAGMA table_info(items)")}
     if "name_search" not in columns:
         cur.execute("ALTER TABLE items ADD COLUMN name_search TEXT")

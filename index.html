@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="theme-color" content="#0b1020">
-  <title>Dofus Craft Manager — Salar V6.5</title>
+  <title>Dofus Craft Manager — Salar V7.1</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,7 +12,7 @@
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark">DC</div>
-      <div><strong>Dofus Craft Manager</strong><small>Salar · V6.5</small></div>
+      <div><strong>Dofus Craft Manager</strong><small>Salar · V7.1</small></div>
     </div>
 
     <nav class="side-nav" aria-label="Navigation principale">
@@ -40,9 +40,9 @@
         <p class="eyebrow">APPLICATION PRIVÉE ET LOCALE</p>
         <h1 id="pageTitle">Dashboard</h1>
       </div>
-      <div class="top-actions">
-        <button id="quickPrices" class="ghost">Saisir des prix</button>
-        <button id="quickCrafts">Voir les crafts</button>
+      <div class="presence-card" id="presenceCard">
+        <div class="presence-title"><i></i><span id="presenceCount">Connexion…</span></div>
+        <div id="presenceUsers" class="presence-users"></div>
       </div>
     </header>
 
@@ -58,7 +58,10 @@
               <button class="go-page secondary" data-target="crafts">Explorer les crafts</button>
             </div>
           </div>
-          <div class="hero-orb"><span>₭</span><small>Optimisation locale</small></div>
+          <section class="hero-activity">
+            <div class="panel-head"><div><span class="kicker">ACTIVITÉ RÉCENTE</span><h3>Dernières modifications</h3></div><span id="lastActivity" class="activity-time">—</span></div>
+            <div id="recentActivity" class="activity-list"><div class="empty">Aucune modification récente.</div></div>
+          </section>
         </div>
 
         <div class="stat-grid">
@@ -67,6 +70,17 @@
           <article class="stat-card"><div class="stat-icon">₭</div><div><b id="sPrices">—</b><span>prix renseignés</span></div></article>
           <article class="stat-card"><div class="stat-icon">↗</div><div><b id="sProfitable">—</b><span>crafts rentables</span></div></article>
         </div>
+
+        <div class="freshness-grid">
+          <article class="freshness-card fresh"><b id="fresh24">—</b><span>prix actualisés &lt; 24 h</span></article>
+          <article class="freshness-card medium"><b id="fresh7">—</b><span>actualisés entre 1 et 7 j</span></article>
+          <article class="freshness-card stale"><b id="stale7">—</b><span>à vérifier (&gt; 7 j)</span></article>
+          <article class="freshness-card activity"><b id="todayUpdates">—</b><span>modifications aujourd’hui</span></article>
+        </div>
+        <section class="panel daily-activity-panel">
+          <div class="panel-head"><div><span class="kicker">AUJOURD’HUI</span><h2>Activité de l’équipe</h2></div></div>
+          <div id="dailyActivity" class="daily-activity"></div>
+        </section>
 
         <div class="dashboard-grid">
           <section class="panel wide-panel">
@@ -174,7 +188,7 @@
       </section>
     </main>
 
-    <footer><span>Dofus Craft Manager V6.5 Atelier & liste de courses</span><span>Serveur Salar · fonctionnement local</span></footer>
+    <footer><span>Dofus Craft Manager V7.1 · serveur privé</span><span>Serveur Salar · prêt pour le réseau privé</span></footer>
   </div>
 </div>
 
@@ -184,9 +198,19 @@
     <span class="kicker">DÉTAIL DU CRAFT</span>
     <h2 id="recipeTitle"></h2>
     <div id="recipeSummary"></div><div class="modal-actions"><input id="modalQty" type="number" min="1" value="1"><button id="addModalShopping">Ajouter à l’atelier</button></div>
-    <div class="modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette complète</h3><small>Modifie le prix de chaque composant et de chaque sous-composant craftable, puis enregistre tout en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
+    <div class="craft-modal-toolbar"><div><button id="expandAllRecipe" class="secondary" type="button">Tout déplier</button><button id="collapseAllRecipe" class="secondary" type="button">Tout replier</button></div><small>Les composants directs restent visibles. Déplie uniquement les sous-recettes utiles.</small></div><div class="modal-grid craft-modal-grid"><section class="recipe-editor-section"><div class="recipe-editor-head"><div><h3>Recette complète</h3><small>Modifie le prix de chaque composant et de chaque sous-composant craftable, puis enregistre tout en une fois.</small></div><button id="saveAllRecipePrices">Enregistrer tous les prix</button></div><div id="recipeSaveState" class="recipe-save-state"></div><div id="recipeBody"></div></section><section><h3>Arbre optimisé</h3><div id="treeBody" class="tree"></div></section></div>
   </div>
 </div>
-<script src="app.js?v=6.5"></script>
+<div id="identityModal" class="modal hidden">
+  <div class="identity-box">
+    <span class="pill">DCM V7.1</span>
+    <h2>Bienvenue sur le serveur</h2>
+    <p>Choisis le prénom ou pseudo qui sera affiché aux autres utilisateurs connectés.</p>
+    <input id="identityInput" maxlength="32" autocomplete="nickname" placeholder="Ex. Charly">
+    <button id="identitySave">Continuer</button>
+    <small>Ce nom est mémorisé uniquement sur cet appareil.</small>
+  </div>
+</div>
+<script src="app.js?v=7.1.1"></script>
 </body>
 </html>

@@ -1,3 +1,21 @@
+
+## V7.0 Alpha — correctif interface Craft
+
+- Remplacement des défilements indépendants par une seule barre de défilement pour toute la fiche Craft.
+- Conservation de l'en-tête de l'éditeur de recette en position fixe pendant le défilement.
+- Correction de `start_server.bat` pour détecter automatiquement `py -3` ou `python`.
+
+# V7.0 Alpha — Fondation serveur privé et Craft interactif
+
+- Fenêtre Craft presque plein écran.
+- Sections centrales défilantes sans perdre les actions principales.
+- Sous-composants repliables/dépliables individuellement.
+- Commandes Tout déplier / Tout replier.
+- Serveur accessible sur le réseau local.
+- Affichage automatique de l’adresse réseau.
+- Sauvegarde automatique au démarrage avec rotation sur 30 fichiers.
+- Aucune prise en charge du x1000, conformément au choix produit.
+
 # V6.6 — Prix récursifs dans les crafts
 
 - Modification du prix de vente de l’objet final.
@@ -50,3 +68,9 @@
 - Ajout de la modification des prix x1, x10 et x100 de l’objet crafté directement dans sa fiche.
 - Enregistrement groupé du prix de vente et des ingrédients.
 - Navigation au clavier avec Entrée entre les champs de prix.
+
+## V7.1.1 — Collaboration stable
+- Correction du démarrage sur un nouvel appareil : la fenêtre d'identité est maintenant chargée avant le JavaScript.
+- Ajout de la présence des utilisateurs connectés.
+- Ajout des statistiques de fraîcheur et de l'activité quotidienne.
+- Conservation et migration automatique de la base V7.0.

@@ -2,10 +2,11 @@ import csv
 import io
 import json
 import shutil
+import socket
 import threading
 import time
 import urllib.parse
-from datetime import datetime
+from datetime import datetime, timedelta
 from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 
 from dcm.config import ROOT, DATA_DIR, DB, normalize_search, visible_item_sql
@@ -17,6 +18,31 @@ from dcm.sync import progress, sync_data
 
 _RESPONSE_CACHE = {}
 _RESPONSE_CACHE_LOCK = threading.RLock()
+_PRESENCE = {}
+_PRESENCE_LOCK = threading.RLock()
+PRESENCE_TTL = 35
+
+def clean_actor(value):
+    value = str(value or "").strip()[:32]
+    return "".join(ch for ch in value if ch.isalnum() or ch in " _-").strip() or "Invité"
+
+def touch_presence(actor):
+    actor = clean_actor(actor)
+    now = time.time()
+    with _PRESENCE_LOCK:
+        _PRESENCE[actor] = now
+        expired = [name for name, seen in _PRESENCE.items() if now - seen > PRESENCE_TTL]
+        for name in expired:
+            _PRESENCE.pop(name, None)
+    return actor
+
+def connected_users():
+    now = time.time()
+    with _PRESENCE_LOCK:
+        expired = [name for name, seen in _PRESENCE.items() if now - seen > PRESENCE_TTL]
+        for name in expired:
+            _PRESENCE.pop(name, None)
+        return sorted(_PRESENCE, key=str.casefold)
 
 def invalidate_response_cache():
     with _RESPONSE_CACHE_LOCK:
@@ -57,6 +83,10 @@ class Handler(SimpleHTTPRequestHandler):
         started = time.perf_counter()
         url = urllib.parse.urlparse(self.path)
         query = urllib.parse.parse_qs(url.query)
+
+        if url.path == "/api/presence":
+            actor = touch_presence(query.get("user", [self.headers.get("X-DCM-User", "")])[0])
+            return self.send_json({"ok": True, "user": actor, "users": connected_users()})
 
         if url.path == "/api/status":
             con = db()
@@ -311,11 +341,35 @@ class Handler(SimpleHTTPRequestHandler):
                             if profit > 0:
                                 profitable.append({**dict(row), **cost, "sale": sale, "tax": tax, "net_sale": net_sale, "tax_rate": rate, "profit": profit, "roi": roi})
                     profitable.sort(key=lambda x: (-x["profit"], -(x["roi"] or -10**30), x["name"].casefold()))
+                    freshness = con.execute("""
+                        SELECT
+                          SUM(CASE WHEN updated_at >= datetime('now','localtime','-1 day') THEN 1 ELSE 0 END) fresh_24h,
+                          SUM(CASE WHEN updated_at < datetime('now','localtime','-1 day') AND updated_at >= datetime('now','localtime','-7 day') THEN 1 ELSE 0 END) fresh_7d,
+                          SUM(CASE WHEN updated_at < datetime('now','localtime','-7 day') THEN 1 ELSE 0 END) stale_7d,
+                          MAX(updated_at) last_activity
+                        FROM prices WHERE COALESCE(p1,p10,p100) IS NOT NULL
+                    """).fetchone()
+                    activity = [dict(r) for r in con.execute("""
+                        SELECT COALESCE(NULLIF(actor,''),'Invité') actor, COUNT(*) count, MAX(recorded_at) last_at
+                        FROM price_history
+                        WHERE date(recorded_at)=date('now','localtime')
+                        GROUP BY COALESCE(NULLIF(actor,''),'Invité')
+                        ORDER BY count DESC, actor COLLATE NOCASE
+                    """)]
+                    recent = [dict(r) for r in con.execute("""
+                        SELECT COALESCE(NULLIF(actor,''),'Invité') actor, COUNT(*) count,
+                               MAX(recorded_at) last_at, strftime('%Y-%m-%d %H:00',recorded_at) period
+                        FROM price_history
+                        WHERE recorded_at >= datetime('now','localtime','-3 day')
+                        GROUP BY COALESCE(NULLIF(actor,''),'Invité'), strftime('%Y-%m-%d %H',recorded_at)
+                        ORDER BY last_at DESC LIMIT 12
+                    """)]
                     return {
-                        "complete": complete_count,
-                        "profitable": len(profitable),
+                        "complete": complete_count, "profitable": len(profitable),
                         "top_profit": profitable[:20],
                         "top_roi": sorted(profitable, key=lambda x: (-(x["roi"] or -10**30), -x["profit"], x["name"].casefold()))[:20],
+                        "freshness": dict(freshness), "activity_today": activity, "recent_activity": recent,
+                        "connected_users": connected_users(),
                     }
                 finally:
                     con.close()
@@ -557,6 +611,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         if url.path == "/api/prices-batch":
             data = self.read_json()
+            actor = touch_presence(data.get("actor") or self.headers.get("X-DCM-User", ""))
             rows = data.get("items", []) if isinstance(data, dict) else []
             normalized = []
             for item in rows:
@@ -577,8 +632,8 @@ class Handler(SimpleHTTPRequestHandler):
                     normalized,
                 )
                 con.executemany(
-                    "INSERT INTO price_history(item_id,p1,p10,p100) VALUES(?,?,?,?)",
-                    normalized,
+                    "INSERT INTO price_history(item_id,p1,p10,p100,actor) VALUES(?,?,?,?,?)",
+                    [(*row, actor) for row in normalized],
                 )
                 con.commit()
             finally:
@@ -589,6 +644,7 @@ class Handler(SimpleHTTPRequestHandler):
 
         if url.path == "/api/prices":
             data = self.read_json()
+            actor = touch_presence(data.get("actor") or self.headers.get("X-DCM-User", ""))
             con = db()
             item_id = int(data["item_id"])
             values = (data.get("p1"), data.get("p10"), data.get("p100"))
@@ -601,7 +657,7 @@ class Handler(SimpleHTTPRequestHandler):
                 """,
                 (item_id, *values),
             )
-            con.execute("INSERT INTO price_history(item_id,p1,p10,p100) VALUES(?,?,?,?)", (item_id, *values))
+            con.execute("INSERT INTO price_history(item_id,p1,p10,p100,actor) VALUES(?,?,?,?,?)", (item_id, *values, actor))
             con.commit()
             invalidate_engine()
             invalidate_response_cache()
@@ -684,8 +740,36 @@ class Handler(SimpleHTTPRequestHandler):
         print(f"[{self.log_date_time_string()}] {fmt % args}")
 
 
+def create_automatic_backup():
+    backup_dir = ROOT / "backups"
+    backup_dir.mkdir(exist_ok=True)
+    stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    target = backup_dir / f"dofus_salar_{stamp}.sqlite"
+    shutil.copy2(DB, target)
+    backups = sorted(backup_dir.glob("dofus_salar_*.sqlite"), key=lambda x: x.stat().st_mtime, reverse=True)
+    for old_backup in backups[30:]:
+        old_backup.unlink(missing_ok=True)
+    return target
+
+def local_ip():
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        sock.connect(("8.8.8.8", 80))
+        address = sock.getsockname()[0]
+        sock.close()
+        return address
+    except OSError:
+        return "127.0.0.1"
+
 if __name__ == "__main__":
     init_db()
-    print("Dofus Craft Manager V6.6 Prix récursifs")
-    print("Ouvre http://127.0.0.1:8765")
-    ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
+    backup = create_automatic_backup()
+    host, port = "0.0.0.0", 8765
+    print("=" * 54)
+    print("Dofus Craft Manager V7.1 - Collaboration")
+    print(f"Local :   http://127.0.0.1:{port}")
+    print(f"Reseau :  http://{local_ip()}:{port}")
+    print(f"Sauvegarde : {backup.name}")
+    print("Le serveur ecoute uniquement tant que cette fenetre reste ouverte.")
+    print("=" * 54)
+    ThreadingHTTPServer((host, port), Handler).serve_forever()

@@ -28,9 +28,41 @@ let autoRefreshEnabled = false;
 let autoRefreshSeconds = 120;
 let autoSyncEnabled = true;
 let analyticsDirty = true;
+let currentUser = (localStorage.getItem('dcm_user_name') || '').trim();
+let presenceTimer = null;
 
-async function api(url, options) {
-  const response = await fetch(url, options);
+function relativeTime(value) {
+  if (!value) return 'Aucune activité';
+  const date = new Date(String(value).replace(' ', 'T'));
+  const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
+  if (seconds < 60) return `il y a ${seconds || 1} s`;
+  const minutes = Math.floor(seconds / 60); if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60); if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24); return `il y a ${days} j`;
+}
+function requireIdentity() {
+  if (currentUser) return Promise.resolve(currentUser);
+  return new Promise(resolve => {
+    const modal=$('#identityModal'), input=$('#identityInput'), save=$('#identitySave');
+    modal.classList.remove('hidden'); input.focus();
+    const commit=()=>{ const name=input.value.trim().replace(/[^\p{L}\p{N} _-]/gu,'').slice(0,32); if(!name){input.focus();return;} currentUser=name; localStorage.setItem('dcm_user_name',name); modal.classList.add('hidden'); resolve(name); };
+    save.onclick=commit; input.onkeydown=e=>{if(e.key==='Enter')commit();};
+  });
+}
+async function refreshPresence() {
+  if (!currentUser) return;
+  try { const p=await api('/api/presence?user='+encodeURIComponent(currentUser)); renderPresence(p.users||[]); } catch(e) { renderPresence([]); }
+}
+function renderPresence(users) {
+  $('#presenceCount').textContent = users.length ? `${users.length} connecté${users.length>1?'s':''}` : 'Serveur hors ligne';
+  $('#presenceUsers').innerHTML = users.map(u=>`<span title="${esc(u)}"><i></i>${esc(u)}</span>`).join('') || '<small>Aucun utilisateur</small>';
+}
+function startPresence(){ clearInterval(presenceTimer); refreshPresence(); presenceTimer=setInterval(refreshPresence,15000); }
+
+async function api(url, options={}) {
+  const headers = new Headers(options.headers || {});
+  if (currentUser) headers.set('X-DCM-User', currentUser);
+  const response = await fetch(url, {...options, headers});
   if (!response.ok) throw new Error((await response.text()) || `Erreur ${response.status}`);
   return response.json();
 }
@@ -46,8 +78,6 @@ function switchPage(target) {
 }
 $$('.tab').forEach(b => b.onclick = () => switchPage(b));
 $$('.go-page').forEach(b => b.onclick = () => switchPage(b.dataset.target));
-$('#quickPrices').onclick = () => switchPage('prices');
-$('#quickCrafts').onclick = () => openCraftRanking('profit');
 function openCraftRanking(sort='profit') {
   craftIngredientFilter = 0; craftIngredientName = '';
   switchPage('crafts');
@@ -161,16 +191,20 @@ async function openRecipe(id, name) {
       const plan = node.purchase_plan || {};
       const children = (node.children || []).map(renderEditableNode).join('');
       const depth = Number(node.depth || 0);
-      return `<div class="recipe-tree-price-row recipe-price-row" data-item-id="${node.ingredient_id}" data-item-name="${esc(ingredientName)}" data-depth="${depth}" style="--recipe-depth:${depth}">
-        <div class="recipe-item-cell"><b>${esc(ingredientName)}</b><small>×${node.unit_quantity} par parent · ×${node.total_quantity} au total · ${node.is_craftable ? 'craftable' : 'ressource'} · ${esc(node.mode || 'incomplet')}</small></div>
-        <input class="rp1 money-field" type="text" inputmode="numeric" placeholder="Prix x1" value="${moneyInputValue(node.p1)}" aria-label="Prix x1 de ${esc(ingredientName)}">
-        <input class="rp10 money-field" type="text" inputmode="numeric" placeholder="Prix x10" value="${moneyInputValue(node.p10)}" aria-label="Prix x10 de ${esc(ingredientName)}">
-        <input class="rp100 money-field" type="text" inputmode="numeric" placeholder="Prix x100" value="${moneyInputValue(node.p100)}" aria-label="Prix x100 de ${esc(ingredientName)}">
-        <span class="recipe-best-lot"><b>${bestLot ? fmt(bestLot.value) : '—'}</b><small>${bestLot ? 'via '+bestLot.label : 'prix manquant'}</small></span>
-        <span class="recipe-line-cost"><b>${fmt(directCost)}</b><small>coût pour le craft</small></span>
-        <button class="open-price-item secondary">Prix HDV →</button>
-        <details class="recipe-buy-details"><summary>Détail du plan d’achat</summary><div>${esc(plan.label || 'Aucun plan calculable')} · ${fmt(plan.cost)}</div></details>
-      </div>${children}`;
+      const hasChildren = Boolean(children);
+      const expanded = depth === 0;
+      return `<div class="recipe-node ${expanded ? 'expanded' : ''}" data-recipe-node data-depth="${depth}">
+        <div class="recipe-tree-price-row recipe-price-row" data-item-id="${node.ingredient_id}" data-item-name="${esc(ingredientName)}" data-depth="${depth}" style="--recipe-depth:${depth}">
+          <div class="recipe-item-cell">${hasChildren ? `<button class="recipe-node-toggle" type="button" aria-expanded="${expanded}" aria-label="${expanded ? 'Replier' : 'Déplier'} ${esc(ingredientName)}"><span>${expanded ? '▼' : '▶'}</span></button>` : '<span class="recipe-node-spacer"></span>'}<span><b>${esc(ingredientName)}</b><small>×${node.unit_quantity} par parent · ×${node.total_quantity} au total · ${node.is_craftable ? 'craftable' : 'ressource'} · ${esc(node.mode || 'incomplet')}</small></span></div>
+          <input class="rp1 money-field" type="text" inputmode="numeric" placeholder="Prix x1" value="${moneyInputValue(node.p1)}" aria-label="Prix x1 de ${esc(ingredientName)}">
+          <input class="rp10 money-field" type="text" inputmode="numeric" placeholder="Prix x10" value="${moneyInputValue(node.p10)}" aria-label="Prix x10 de ${esc(ingredientName)}">
+          <input class="rp100 money-field" type="text" inputmode="numeric" placeholder="Prix x100" value="${moneyInputValue(node.p100)}" aria-label="Prix x100 de ${esc(ingredientName)}">
+          <span class="recipe-best-lot"><b>${bestLot ? fmt(bestLot.value) : '—'}</b><small>${bestLot ? 'via '+bestLot.label : 'prix manquant'}</small></span>
+          <span class="recipe-line-cost"><b>${fmt(directCost)}</b><small>coût pour le craft</small></span>
+          <button class="open-price-item secondary">Prix HDV →</button>
+          <details class="recipe-buy-details"><summary>Détail du plan d’achat</summary><div>${esc(plan.label || 'Aucun plan calculable')} · ${fmt(plan.cost)}</div></details>
+        </div>${hasChildren ? `<div class="recipe-node-children">${children}</div>` : ''}
+      </div>`;
     };
     const ingredientRows = (recipe.editable_tree || []).map(renderEditableNode).join('');
     $('#recipeBody').innerHTML = editableNodes.length ? `<div class="recursive-price-help"><b>Recette complète modifiable</b><small>Les lignes indentées sont les composants des composants. Tous les prix x1, x10 et x100 peuvent être enregistrés en une seule fois.</small></div><div class="recipe-price-table recursive-price-table">
@@ -180,10 +214,32 @@ async function openRecipe(id, name) {
       $('#openFirstMissing').onclick = () => openItemInPrices(missing[0].name || String(missing[0].ingredient_id));
     }
     bindRecipePriceTable();
+    bindRecipeTreeControls();
     $('#treeBody').innerHTML = treeHtml(tree);
     $('#recipeModal').classList.remove('hidden');
   } catch(e) { alert('Impossible de charger ce craft : ' + e.message); }
 }
+
+function setRecipeNodeExpanded(node, expanded) {
+  if (!node) return;
+  node.classList.toggle('expanded', expanded);
+  const toggle = node.querySelector(':scope > .recipe-price-row .recipe-node-toggle');
+  if (toggle) {
+    toggle.setAttribute('aria-expanded', String(expanded));
+    toggle.setAttribute('aria-label', `${expanded ? 'Replier' : 'Déplier'} ${node.querySelector(':scope > .recipe-price-row .recipe-item-cell b')?.textContent || 'la sous-recette'}`);
+    const icon = toggle.querySelector('span'); if (icon) icon.textContent = expanded ? '▼' : '▶';
+  }
+}
+function bindRecipeTreeControls() {
+  $$('#recipeBody .recipe-node-toggle').forEach(toggle => toggle.addEventListener('click', event => {
+    event.preventDefault(); event.stopPropagation();
+    const node = toggle.closest('[data-recipe-node]');
+    setRecipeNodeExpanded(node, !node.classList.contains('expanded'));
+  }));
+  $('#expandAllRecipe')?.addEventListener('click', () => $$('#recipeBody [data-recipe-node]').forEach(node => setRecipeNodeExpanded(node, true)));
+  $('#collapseAllRecipe')?.addEventListener('click', () => $$('#recipeBody [data-recipe-node]').forEach(node => setRecipeNodeExpanded(node, Number(node.dataset.depth) === 0)));
+}
+
 function openItemInPrices(name) {
   $('#recipeModal').classList.add('hidden');
   switchPage('prices');
@@ -407,6 +463,18 @@ async function loadDashboard() {
   $('#sProfitable').textContent = Number(d.profitable || 0).toLocaleString('fr-FR');
   $('#topCrafts').innerHTML = craftRows(d.top_profit || []);
   $('#topRoi').innerHTML = craftRows(d.top_roi || []);
+  const f=d.freshness||{};
+  $('#fresh24').textContent=Number(f.fresh_24h||0).toLocaleString('fr-FR');
+  $('#fresh7').textContent=Number(f.fresh_7d||0).toLocaleString('fr-FR');
+  $('#stale7').textContent=Number(f.stale_7d||0).toLocaleString('fr-FR');
+  const activity=d.activity_today||[];
+  const total=activity.reduce((sum,x)=>sum+Number(x.count||0),0);
+  $('#todayUpdates').textContent=total.toLocaleString('fr-FR');
+  $('#dailyActivity').innerHTML=activity.length?activity.map(x=>`<div><span class="activity-avatar">${esc((x.actor||'?').slice(0,1).toUpperCase())}</span><b>${esc(x.actor)}</b><span>${Number(x.count).toLocaleString('fr-FR')} prix modifié${Number(x.count)>1?'s':''}</span><small>${relativeTime(x.last_at)}</small></div>`).join(''):'<div class="empty">Aucun prix modifié aujourd’hui.</div>';
+  const recent=d.recent_activity||[];
+  $('#recentActivity').innerHTML=recent.length?recent.slice(0,6).map(x=>`<div><span class="activity-avatar">${esc((x.actor||'?').slice(0,1).toUpperCase())}</span><span><b>${esc(x.actor)}</b><small>${Number(x.count)} prix modifié${Number(x.count)>1?'s':''}</small></span><time>${relativeTime(x.last_at)}</time></div>`).join(''):'<div class="empty">Aucune modification récente.</div>';
+  $('#lastActivity').textContent=relativeTime(f.last_activity);
+  renderPresence(d.connected_users||[]);
   $$('#topCrafts .craft-row,#topRoi .craft-row').forEach(row => row.onclick = () => openRecipe(row.dataset.id, row.dataset.name));
 }
 function download(url) { const a=document.createElement('a'); a.href=url; document.body.appendChild(a); a.click(); a.remove(); }
@@ -450,6 +518,8 @@ $('#importFile').onchange = async e => { if(!e.target.files[0]) return; const ro
 
 (async function init() {
   try {
+    await requireIdentity();
+    startPresence();
     const [status] = await Promise.all([loadStatus(),loadCategories(),loadPrices(''),loadSettings()]);
     await loadDashboard();
     await maybeAutoSyncRecipes(status);
